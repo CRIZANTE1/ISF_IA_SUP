@@ -1,0 +1,2109 @@
+from operations.canhao_monitor_operations import (
+    save_canhao_monitor_action_log,
+    save_canhao_monitor_inspection,
+    CHECKLIST_VISUAL as CANHAO_CHECKLIST_VISUAL
+)
+from operations.alarm_operations import (
+    save_alarm_action_log, get_alarm_status_df, save_alarm_inspection,
+    CHECKLIST_QUESTIONS as ALARM_CHECKLIST
+)
+from operations.multigas_operations import save_multigas_action_log
+from operations.foam_chamber_operations import (
+    save_foam_chamber_inspection,
+    save_foam_chamber_action_log,
+    CHECKLIST_QUESTIONS as FOAM_CHAMBER_CHECKLIST
+)
+from operations.eyewash_operations import (
+    save_eyewash_inspection,
+    save_eyewash_action_log,
+    CHECKLIST_QUESTIONS as EYEWASH_CHECKLIST
+)
+from operations.scba_operations import save_scba_visual_inspection, save_scba_action_log
+from reports.monthly_report_ui import show_monthly_report_interface
+from storage.client import upload_evidence_photo
+from operations.corrective_actions import save_corrective_action
+from operations.shelter_operations import save_shelter_action_log, save_shelter_inspection
+from reports.reports_pdf import generate_shelters_html
+from operations.extinguisher_operations import batch_regularize_monthly_inspections
+from operations.instrucoes import instru_dash
+from config.page_config import set_page_config
+from auth.auth_utils import is_admin, get_user_display_name
+from operations.history import load_sheet_data, find_last_record
+import streamlit as st
+import pandas as pd
+from datetime import date
+from dateutil.relativedelta import relativedelta
+from datetime import datetime
+import sys
+import os
+import numpy as np
+import json
+from streamlit_js_eval import streamlit_js_eval
+from storage import display_storage_image
+from reports.alarm_report import generate_alarm_inspection_html
+from supabase.client import get_supabase_client
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+set_page_config()
+
+
+def get_canhao_monitor_status_df(df_inspections):
+    if df_inspections.empty:
+        return pd.DataFrame()
+
+    df_inspections['data_inspecao'] = pd.to_datetime(
+        df_inspections['data_inspecao'], errors='coerce')
+    latest_inspections = df_inspections.sort_values(
+        'data_inspecao', ascending=False).drop_duplicates(subset='id_equipamento', keep='first').copy()
+
+    today = pd.Timestamp(date.today())
+    latest_inspections['data_proxima_inspecao'] = pd.to_datetime(
+        latest_inspections['data_proxima_inspecao'], errors='coerce')
+
+    conditions = [
+        (latest_inspections['data_proxima_inspecao'] < today),
+        (latest_inspections['status_geral'] == 'Reprovado com Pendências')
+    ]
+    choices = ['🔴 VENCIDO', '🟠 COM PENDÊNCIAS']
+    latest_inspections['status_dashboard'] = np.select(
+        conditions, choices, default='🟢 OK')
+
+    return latest_inspections
+
+
+@st.dialog("Registrar Ação Corretiva para Canhão Monitor")
+def action_dialog_canhao_monitor(item_row):
+    equipment_id = item_row['id_equipamento']
+    problem = item_row['plano_de_acao']
+
+    st.write(f"**Equipamento ID:** `{equipment_id}`")
+    st.write(f"**Problema Identificado:** `{problem}`")
+
+    action_taken = st.text_area("Descreva a ação corretiva realizada:")
+    responsible = st.text_input(
+        "Responsável pela ação:", value=get_user_display_name())
+
+    st.markdown("---")
+    st.write("Opcional: Anexe uma foto como evidência da ação concluída.")
+    photo_evidence = st.file_uploader("Foto da Evidência", type=[
+                                      "jpg", "jpeg", "png"], key=f"photo_action_canhao_{equipment_id}")
+
+    if st.button("Salvar Ação e Regularizar Status", type="primary"):
+        if not action_taken:
+            st.error("Por favor, descreva a ação realizada.")
+            return
+
+        with st.spinner("Registrando ação e regularizando status..."):
+            # Mock de resultados para a nova inspeção
+            mock_results = {q: "Conforme" for cat in CANHAO_CHECKLIST_VISUAL.values() for q in cat}
+
+            # >>> Início da Lógica Corrigida <<<
+            try:
+                # Tenta salvar a nova inspeção PRIMEIRO (operação mais crítica)
+                inspection_saved = save_canhao_monitor_inspection(
+                    equip_id=equipment_id,
+                    inspection_type="Visual Trimestral (Regularização)",
+                    overall_status="Aprovado",
+                    results_dict=mock_results,
+                    photo_file=None, # A foto da ação vai no log, não na inspeção de regularização
+                    inspector_name=get_user_display_name()
+                )
+
+                if not inspection_saved:
+                    # Se a inspeção falhou, não prossiga. A função já mostra um st.error.
+                    raise Exception("Falha ao salvar a nova inspeção de regularização.")
+
+                # Se a inspeção foi salva com sucesso, salve o log da ação
+                # A foto de evidência da ação é associada ao log, não à inspeção de regularização
+                log_saved = save_canhao_monitor_action_log(
+                    equipment_id, problem, action_taken, responsible, photo_evidence
+                )
+                
+                if not log_saved:
+                     # Isso é raro, mas se acontecer, a inspeção foi salva mas o log não.
+                     # O status do equipamento estará OK, o que é o mais importante.
+                    st.warning("Status do equipamento regularizado, mas houve uma falha ao salvar o log detalhado da ação.")
+                
+                # Sucesso em ambas as operações
+                st.success("Ação registrada e status do equipamento regularizado com sucesso!")
+                #st.balloons()
+                st.cache_data.clear()
+                st.rerun() # Fecha o diálogo e atualiza a página
+
+            except Exception as e:
+                # Se qualquer uma das operações falhar, o erro é capturado aqui
+                st.error(f"Não foi possível concluir a regularização: {e}")
+                st.info("A pendência não foi resolvida. Por favor, tente novamente.")
+
+
+def get_multigas_status_df(df_inventory, df_inspections):
+    if df_inventory.empty:
+        return pd.DataFrame()
+
+    dashboard_df = df_inventory.copy()
+
+    if df_inspections.empty:
+        dashboard_df['status_calibracao'] = '🔵 PENDENTE'
+        dashboard_df['status_bump_test'] = '🔵 PENDENTE'
+        dashboard_df['proxima_calibracao'] = pd.NaT
+        dashboard_df['resultado_ultimo_bump_test'] = 'N/A'
+        dashboard_df['data_ultimo_bump_test'] = pd.NaT
+        dashboard_df['link_certificado'] = None
+        return dashboard_df
+
+    df_inspections['data_teste'] = pd.to_datetime(
+        df_inspections['data_teste'], errors='coerce')
+
+    dashboard_df['proxima_calibracao'] = pd.NaT
+    dashboard_df['link_certificado'] = None
+    dashboard_df['resultado_ultimo_bump_test'] = 'N/A'
+    dashboard_df['data_ultimo_bump_test'] = pd.NaT
+
+    for index, row in dashboard_df.iterrows():
+        equip_id = row['id_equipamento']
+        equip_inspections = df_inspections[df_inspections['id_equipamento'] == equip_id]
+
+        if not equip_inspections.empty:
+            calibrations = equip_inspections[equip_inspections['tipo_teste']
+                                             == 'Calibração Anual']
+            if not calibrations.empty:
+                last_calib = calibrations.sort_values(
+                    'data_teste', ascending=False).iloc[0]
+                dashboard_df.loc[index, 'proxima_calibracao'] = last_calib.get(
+                    'proxima_calibracao')
+                dashboard_df.loc[index, 'link_certificado'] = last_calib.get(
+                    'link_certificado')
+
+            bump_tests = equip_inspections[equip_inspections['tipo_teste']
+                                           != 'Calibração Anual']
+            if not bump_tests.empty:
+                last_bump = bump_tests.sort_values(
+                    'data_teste', ascending=False).iloc[0]
+                dashboard_df.loc[index, 'resultado_ultimo_bump_test'] = last_bump.get(
+                    'resultado_teste')
+                dashboard_df.loc[index, 'data_ultimo_bump_test'] = last_bump.get(
+                    'data_teste')
+
+    today = pd.Timestamp(date.today())
+
+    dashboard_df['proxima_calibracao'] = pd.to_datetime(
+        dashboard_df['proxima_calibracao'], errors='coerce')
+    dashboard_df['status_calibracao'] = np.where(
+        dashboard_df['proxima_calibracao'].isna(), '🔵 PENDENTE',
+        np.where(dashboard_df['proxima_calibracao']
+                 < today, '🔴 VENCIDO', '🟢 OK')
+    )
+
+    dashboard_df['status_bump_test'] = np.where(
+        dashboard_df['resultado_ultimo_bump_test'].isin(
+            ['N/A', None, '']), '🔵 PENDENTE',
+        np.where(dashboard_df['resultado_ultimo_bump_test']
+                 == 'Reprovado', '🟠 REPROVADO', '🟢 OK')
+    )
+
+    return dashboard_df
+
+
+def get_foam_chamber_status_df(df_inspections):
+    if df_inspections.empty:
+        return pd.DataFrame()
+
+    df_inspections['data_inspecao'] = pd.to_datetime(
+        df_inspections['data_inspecao'], errors='coerce')
+    latest_inspections = df_inspections.sort_values(
+        'data_inspecao', ascending=False).drop_duplicates(subset='id_camara', keep='first').copy()
+
+    today = pd.Timestamp(date.today())
+    latest_inspections['data_proxima_inspecao'] = pd.to_datetime(
+        latest_inspections['data_proxima_inspecao'], errors='coerce')
+
+    conditions = [
+        (latest_inspections['data_proxima_inspecao'] < today),
+        (latest_inspections['status_geral'] == 'Reprovado com Pendências')
+    ]
+    choices = ['🔴 VENCIDO', '🟠 COM PENDÊNCIAS']
+    latest_inspections['status_dashboard'] = np.select(
+        conditions, choices, default='🟢 OK')
+
+    return latest_inspections
+
+
+def get_eyewash_status_df(df_inspections):
+    if df_inspections.empty:
+        return pd.DataFrame()
+
+    df_inspections['data_inspecao'] = pd.to_datetime(
+        df_inspections['data_inspecao'], errors='coerce')
+
+    latest_inspections = df_inspections.sort_values(
+        'data_inspecao', ascending=False).drop_duplicates(subset='id_equipamento', keep='first').copy()
+
+    today = pd.Timestamp(date.today())
+    latest_inspections['data_proxima_inspecao'] = pd.to_datetime(
+        latest_inspections['data_proxima_inspecao'], errors='coerce')
+
+    conditions = [
+        (latest_inspections['data_proxima_inspecao'] < today),
+        (latest_inspections['status_geral'] == 'Reprovado com Pendências')
+    ]
+    choices = ['🔴 VENCIDO', '🟠 COM PENDÊNCIAS']
+    latest_inspections['status_dashboard'] = np.select(
+        conditions, choices, default='🟢 OK')
+
+    return latest_inspections
+
+
+def get_scba_status_df(df_scba_main, df_scba_visual):
+    if df_scba_main.empty:
+        return pd.DataFrame()
+
+    equipment_tests = df_scba_main.dropna(
+        subset=['numero_serie_equipamento', 'data_teste']).copy()
+    if equipment_tests.empty:
+        return pd.DataFrame()
+
+    latest_tests = equipment_tests.sort_values('data_teste', ascending=False).drop_duplicates(
+        subset='numero_serie_equipamento', keep='first')
+
+    if not df_scba_visual.empty:
+        df_scba_visual['data_inspecao'] = pd.to_datetime(
+            df_scba_visual['data_inspecao'], errors='coerce')
+        latest_visual = df_scba_visual.sort_values('data_inspecao', ascending=False).drop_duplicates(
+            subset='numero_serie_equipamento', keep='first')
+        dashboard_df = pd.merge(latest_tests, latest_visual,
+                                on='numero_serie_equipamento', how='left', suffixes=('_teste', '_visual'))
+    else:
+        dashboard_df = latest_tests
+        for col in ['data_inspecao', 'data_proxima_inspecao', 'status_geral', 'resultados_json']:
+            dashboard_df[col] = None
+
+    today = pd.Timestamp(date.today())
+    dashboard_df['data_validade'] = pd.to_datetime(
+        dashboard_df['data_validade'], errors='coerce')
+    dashboard_df['data_proxima_inspecao'] = pd.to_datetime(
+        dashboard_df['data_proxima_inspecao'], errors='coerce')
+
+    conditions = [
+        (dashboard_df['data_validade'] < today),
+        (dashboard_df['data_proxima_inspecao'] < today),
+        (dashboard_df['status_geral'] == 'Reprovado com Pendências')
+    ]
+    choices = ['🔴 VENCIDO (Teste Posi3)',
+               '🔴 VENCIDO (Insp. Periódica)', '🟠 COM PENDÊNCIAS']
+    dashboard_df['status_consolidado'] = np.select(
+        conditions, choices, default='🟢 OK')
+
+    return dashboard_df
+
+
+def get_hose_status_df(df_hoses, df_disposals):
+    if df_hoses.empty:
+        return pd.DataFrame()
+
+    for col in ['data_inspecao', 'data_proximo_teste']:
+        if col not in df_hoses.columns:
+            df_hoses[col] = pd.NaT
+        df_hoses[col] = pd.to_datetime(df_hoses[col], errors='coerce')
+
+    latest_hoses = df_hoses.sort_values('data_inspecao', ascending=False).drop_duplicates(
+        subset='id_mangueira', keep='first').copy()
+
+    if not df_disposals.empty and 'id_mangueira' in df_disposals.columns:
+        disposed_ids = df_disposals['id_mangueira'].astype(str).unique()
+        latest_hoses = latest_hoses[~latest_hoses['id_mangueira'].astype(
+            str).isin(disposed_ids)]
+
+    if latest_hoses.empty:
+        return pd.DataFrame()
+
+    today = pd.Timestamp(date.today())
+
+    if 'resultado' not in latest_hoses.columns:
+        latest_hoses['resultado'] = ''
+    latest_hoses['resultado'] = latest_hoses['resultado'].fillna(
+        '').str.lower()
+
+    rejection_keywords = ['reprovado', 'condenada', 'rejeitado', 'condenado']
+
+    is_rejected = latest_hoses['resultado'].str.contains(
+        '|'.join(rejection_keywords), na=False)
+
+    conditions = [
+        is_rejected,
+        (latest_hoses['data_proximo_teste'] < today)
+    ]
+    choices = ['🟠 REPROVADA', '🔴 VENCIDO']
+    latest_hoses['status'] = np.select(conditions, choices, default='🟢 OK')
+
+
+
+    display_columns = [
+        'id_mangueira', 'status', 'marca', 'diametro', 'tipo',
+        'comprimento', 'ano_fabricacao', 'data_inspecao',
+        'data_proximo_teste', 'link_certificado_pdf', 'registrado_por'
+    ]
+
+    existing_display_columns = [
+        col for col in display_columns if col in latest_hoses.columns]
+
+    return latest_hoses[existing_display_columns]
+
+
+@st.dialog("Registrar Ação Corretiva para Detector Multigás")
+def action_dialog_multigas(item_row):
+    equipment_id = item_row['id_equipamento']
+
+    problem = []
+    if item_row['status_calibracao'] != '🟢 OK':
+        problem.append(f"Calibração: {item_row['status_calibracao']}")
+    if item_row['status_bump_test'] != '🟢 OK':
+        problem.append(f"Bump Test: {item_row['status_bump_test']}")
+    problem_str = " | ".join(problem)
+
+    st.write(f"**Detector ID:** `{equipment_id}`")
+    st.write(f"**Problema Identificado:** `{problem_str}`")
+
+    action_taken = st.text_area("Descreva a ação corretiva realizada:")
+    responsible = st.text_input(
+        "Responsável pela ação:", value=get_user_display_name())
+
+    st.markdown("---")
+    st.write("Opcional: Anexe uma foto como evidência da ação concluída.")
+    photo_evidence = st.file_uploader(
+        "Foto da Evidência", type=["jpg", "jpeg", "png"])
+
+    if st.button("Salvar Ação", type="primary"):
+        if not action_taken:
+            st.error("Por favor, descreva a ação realizada.")
+            return
+
+        with st.spinner("Registrando ação..."):
+            log_saved = save_multigas_action_log(
+                equipment_id, problem_str, action_taken, responsible, photo_evidence)
+
+            if log_saved:
+                st.success("Ação registrada com sucesso!")
+                st.cache_data.clear()
+                st.rerun()
+            else:
+                st.error("Falha ao salvar o log da ação.")
+
+
+@st.dialog("Registrar Baixa Definitiva de Extintor")
+def disposal_dialog_extinguisher(item_row):
+    equipment_id = item_row['numero_identificacao']
+    problem = item_row['plano_de_acao']
+
+    st.warning(
+        f"⚠️ **ATENÇÃO:** Você está registrando a **BAIXA DEFINITIVA** do extintor **{equipment_id}**")
+    st.error(
+        "Esta ação é **IRREVERSÍVEL** e remove o equipamento permanentemente do inventário ativo.")
+
+    st.write(f"**Equipamento ID:** `{equipment_id}`")
+    st.write(f"**Problema Atual:** `{problem}`")
+
+    st.markdown("---")
+
+    condemnation_options = [
+        "Casco danificado irreparavelmente",
+        "Falha no teste hidrostático",
+        "Corrosão severa",
+        "Equipamento obsoleto/descontinuado",
+        "Danos por impacto",
+        "Vazamento não reparável",
+        "Fim da vida útil",
+        "Outro motivo"
+    ]
+
+    condemnation_reason = st.selectbox(
+        "Motivo da Condenação:", condemnation_options)
+
+    if condemnation_reason == "Outro motivo":
+        custom_reason = st.text_input("Especifique o motivo:")
+        final_reason = custom_reason if custom_reason else "Não especificado"
+    else:
+        final_reason = condemnation_reason
+
+    st.markdown("### Extintor Substituto (OBRIGATÓRIO)")
+    st.info("Para manter a proteção, é obrigatório informar o extintor que substituirá este equipamento.")
+    substitute_id = st.text_input(
+        "ID do Extintor Substituto:", help="Digite o ID do novo extintor que será instalado no local")
+
+    observations = st.text_area(
+        "Observações Adicionais (opcional):", help="Detalhes técnicos, recomendações, etc.")
+
+    st.markdown("### Evidência Fotográfica")
+    st.write("Anexe uma foto do equipamento condenado como evidência:")
+
+    photo_option = st.radio("Método de captura:", [
+                            "📷 Tirar foto agora", "📁 Upload de arquivo"], horizontal=True)
+
+    photo_evidence = None
+    if photo_option == "📷 Tirar foto agora":
+        photo_evidence = st.camera_input("Foto do equipamento condenado")
+    else:
+        photo_evidence = st.file_uploader(
+            "Selecione a foto", type=["jpg", "jpeg", "png"])
+
+    st.markdown("---")
+
+    st.markdown("### Confirmação Final")
+    confirm_disposal = st.checkbox(
+        "✅ Confirmo que este equipamento deve ser BAIXADO DEFINITIVAMENTE do sistema")
+    confirm_substitute = st.checkbox(
+        "✅ Confirmo que o equipamento substituto será instalado imediatamente")
+
+    if st.button("🗑️ CONFIRMAR BAIXA DEFINITIVA", type="primary", disabled=not (confirm_disposal and confirm_substitute and substitute_id and photo_evidence)):
+        if not substitute_id:
+            st.error("É obrigatório informar o ID do extintor substituto.")
+            return
+
+        if not photo_evidence:
+            st.error("É obrigatório anexar uma foto como evidência.")
+            return
+
+        with st.spinner("Registrando baixa definitiva..."):
+            from operations.extinguisher_disposal_operations import register_extinguisher_disposal
+
+            success = register_extinguisher_disposal(
+                equipment_id=equipment_id,
+                condemnation_reason=final_reason,
+                substitute_id=substitute_id,
+                observations=observations,
+                photo_evidence=photo_evidence
+            )
+
+            if success:
+                st.success(
+                    f"✅ Extintor {equipment_id} baixado definitivamente!")
+                st.success(
+                    f"🔄 Lembre-se de instalar o substituto {substitute_id} no local.")
+                #st.balloons()
+                st.cache_data.clear()
+                st.rerun()
+            else:
+                st.error("❌ Falha ao registrar a baixa. Tente novamente.")
+
+
+@st.dialog("Registrar Baixa e Substituição de Mangueira")
+def dispose_hose_dialog(hose_id):
+    st.warning(
+        f"Você está registrando a baixa da mangueira **ID: {hose_id}**.")
+    st.info("Esta ação irá remover a mangueira da lista de equipamentos ativos.")
+
+    reason = st.selectbox(
+        "Motivo da Baixa:",
+        ["Reprovada no Teste Hidrostático",
+            "Dano Irreparável", "Fim da Vida Útil", "Outro"]
+    )
+    substitute_id = st.text_input("ID da Mangueira Substituta (Opcional)")
+
+    if st.button("Confirmar Baixa", type="primary"):
+        with st.spinner("Registrando..."):
+            log_row = {
+                "data_baixa": date.today().isoformat(),
+                "id_mangueira": hose_id,
+                "motivo": reason,
+                "responsavel": get_user_display_name(),
+                "id_substituta": substitute_id if substitute_id else None
+            }
+            try:
+                db_client = get_supabase_client()
+                db_client.append_data("baixas_mangueiras", log_row)
+                st.success(
+                    f"Baixa da mangueira {hose_id} registrada com sucesso!")
+                st.cache_data.clear()
+                st.rerun()
+            except Exception as e:
+                st.error(f"Ocorreu um erro ao registrar a baixa: {e}")
+
+
+def get_shelter_status_df(df_shelters_registered, df_inspections):
+    if df_shelters_registered.empty:
+        return pd.DataFrame()
+
+    latest_inspections_list = []
+    if not df_inspections.empty:
+        df_inspections['data_inspecao'] = pd.to_datetime(
+            df_inspections['data_inspecao'], errors='coerce').dt.date
+
+        for shelter_id in df_shelters_registered['id_abrigo'].unique():
+            shelter_inspections = df_inspections[df_inspections['id_abrigo'] == shelter_id].copy(
+            )
+            if not shelter_inspections.empty:
+                shelter_inspections = shelter_inspections.sort_values(
+                    by='data_inspecao', ascending=False)
+
+                latest_date = shelter_inspections['data_inspecao'].iloc[0]
+                inspections_on_latest_date = shelter_inspections[
+                    shelter_inspections['data_inspecao'] == latest_date]
+
+                approved_on_latest = inspections_on_latest_date[
+                    inspections_on_latest_date['status_geral'] != 'Reprovado com Pendências']
+
+                if not approved_on_latest.empty:
+                    latest_inspections_list.append(approved_on_latest.iloc[0])
+                else:
+                    latest_inspections_list.append(
+                        inspections_on_latest_date.iloc[0])
+
+    latest_inspections = pd.DataFrame(latest_inspections_list)
+
+    if not latest_inspections.empty:
+        dashboard_df = pd.merge(df_shelters_registered[[
+                                'id_abrigo', 'cliente', 'local']], latest_inspections, on='id_abrigo', how='left')
+    else:
+
+        dashboard_df = df_shelters_registered.copy()
+        for col in ['data_inspecao', 'data_proxima_inspecao', 'status_geral', 'inspetor', 'resultados_json']:
+            dashboard_df[col] = None
+
+    today = pd.to_datetime(date.today()).date()
+    dashboard_df['data_proxima_inspecao'] = pd.to_datetime(
+        dashboard_df['data_proxima_inspecao'], errors='coerce').dt.date
+
+    conditions = [
+        (dashboard_df['data_inspecao'].isna()),
+        (dashboard_df['data_proxima_inspecao'] < today),
+        (dashboard_df['status_geral'] == 'Reprovado com Pendências')
+    ]
+    choices = ['🔵 PENDENTE (Nova Inspeção)', '🔴 VENCIDO', '🟠 COM PENDÊNCIAS']
+    dashboard_df['status_dashboard'] = np.select(
+        conditions, choices, default='🟢 OK')
+
+
+    dashboard_df['inspetor'] = dashboard_df['inspetor'].fillna('N/A')
+    dashboard_df['resultados_json'] = dashboard_df['resultados_json'].fillna(
+        '{}')
+
+    display_columns = ['id_abrigo', 'status_dashboard', 'data_inspecao_str',
+                       'data_proxima_inspecao_str', 'status_geral', 'inspetor', 'resultados_json', 'local']
+    existing_columns = [
+        col for col in display_columns if col in dashboard_df.columns]
+
+    return dashboard_df[existing_columns]
+
+
+def get_consolidated_status_df(df_full, df_locais):
+    if df_full.empty:
+        return pd.DataFrame()
+
+    from operations.extinguisher_disposal_operations import get_disposed_extinguishers
+
+    consolidated_data = []
+    df_copy = df_full.copy()
+    df_copy['data_servico'] = pd.to_datetime(
+        df_copy['data_servico'], errors='coerce')
+    df_copy = df_copy.dropna(subset=['data_servico'])
+
+    df_disposed = get_disposed_extinguishers()
+    disposed_ids = df_disposed['numero_identificacao'].tolist(
+    ) if not df_disposed.empty else []
+
+    unique_ids = df_copy['numero_identificacao'].unique()
+
+    for ext_id in unique_ids:
+        if ext_id in disposed_ids:
+            continue
+
+        ext_df = df_copy[df_copy['numero_identificacao']
+                         == ext_id].sort_values(by='data_servico')
+        if ext_df.empty:
+            continue
+
+        latest_record_info = ext_df.iloc[-1]
+
+        last_insp_date = ext_df['data_servico'].max()
+        last_maint2_date = ext_df[ext_df['tipo_servico']
+                                  == 'Manutenção Nível 2']['data_servico'].max()
+        last_maint3_date = ext_df[ext_df['tipo_servico']
+                                  == 'Manutenção Nível 3']['data_servico'].max()
+
+        dates_that_renew_inspection = [
+            last_insp_date, last_maint2_date, last_maint3_date]
+        valid_dates_inspection = [
+            d for d in dates_that_renew_inspection if pd.notna(d)]
+        if valid_dates_inspection:
+            most_recent_inspection_renewal = max(valid_dates_inspection)
+            next_insp = most_recent_inspection_renewal + \
+                relativedelta(months=1)
+        else:
+            next_insp = pd.NaT
+
+        dates_that_renew_n2 = [last_maint2_date, last_maint3_date]
+        valid_dates_n2 = [d for d in dates_that_renew_n2 if pd.notna(d)]
+        if valid_dates_n2:
+            most_recent_n2_renewal = max(valid_dates_n2)
+            next_maint2 = most_recent_n2_renewal + relativedelta(months=12)
+        else:
+            next_maint2 = pd.NaT
+
+        if pd.notna(last_maint3_date):
+            next_maint3 = last_maint3_date + relativedelta(years=5)
+        else:
+            next_maint3 = pd.NaT
+
+        vencimentos = [d for d in [next_insp,
+                                   next_maint2, next_maint3] if pd.notna(d)]
+        if not vencimentos:
+            continue
+        proximo_vencimento_real = min(vencimentos)
+
+        today_ts = pd.Timestamp(date.today())
+        status_atual = "OK"
+
+        if latest_record_info.get('plano_de_acao') == "FORA DE OPERAÇÃO (SUBSTITUÍDO)":
+            status_atual = "FORA DE OPERAÇÃO"
+        elif latest_record_info.get('aprovado_inspecao') == 'Não':
+            status_atual = "NÃO CONFORME (Aguardando Ação)"
+        elif proximo_vencimento_real < today_ts:
+            status_atual = "VENCIDO"
+
+        # Verifica se o equipamento está fora de operação por substituição ou baixa definitiva
+        plano_de_acao_upper = str(latest_record_info.get('plano_de_acao', '')).upper()
+        if "FORA DE OPERAÇÃO" in plano_de_acao_upper or "BAIXADO DEFINITIVAMENTE" in plano_de_acao_upper:
+            continue
+
+        consolidated_data.append({
+            'numero_identificacao': ext_id,
+            'numero_selo_inmetro': latest_record_info.get('numero_selo_inmetro'),
+            'tipo_agente': latest_record_info.get('tipo_agente'),
+            'status_atual': status_atual,
+            'proximo_vencimento_geral': proximo_vencimento_real,
+            'prox_venc_inspecao': next_insp if pd.notna(next_insp) else pd.NaT,
+            'prox_venc_maint2': next_maint2 if pd.notna(next_maint2) else pd.NaT,
+            'prox_venc_maint3': next_maint3 if pd.notna(next_maint3) else pd.NaT,
+            'plano_de_acao': latest_record_info.get('plano_de_acao'),
+        })
+
+    if not consolidated_data:
+        return pd.DataFrame()
+
+    dashboard_df = pd.DataFrame(consolidated_data)
+    if not df_locais.empty:
+        df_locais = df_locais.rename(columns={'id': 'numero_identificacao'})
+        df_locais['numero_identificacao'] = df_locais['numero_identificacao'].astype(
+            str)
+        dashboard_df = pd.merge(dashboard_df, df_locais[[
+                                'numero_identificacao', 'local']], on='numero_identificacao', how='left')
+        dashboard_df['status_instalacao'] = dashboard_df['local'].apply(
+            lambda x: f"✅ {x}" if pd.notna(x) and str(x).strip() != '' else "⚠️ Local não definido")
+    else:
+        dashboard_df['status_instalacao'] = "⚠️ Local não definido"
+
+    return dashboard_df
+
+
+@st.dialog("Registrar Ação Corretiva para Sistema de Alarme")
+def action_dialog_alarm(item_row):
+    system_id = item_row['id_sistema']
+    problem = item_row['plano_de_acao']
+
+    st.write(f"**Sistema ID:** `{system_id}`")
+    st.write(f"**Problema Identificado:** `{problem}`")
+
+    action_taken = st.text_area("Descreva a ação corretiva realizada:")
+    responsible = st.text_input(
+        "Responsável pela ação:", value=get_user_display_name())
+
+    st.markdown("---")
+    st.write("Opcional: Anexe uma foto como evidência da ação concluída.")
+    photo_evidence = st.file_uploader(
+        "Foto da Evidência", type=["jpg", "jpeg", "png"])
+
+    if st.button("Salvar Ação e Regularizar Status", type="primary"):
+        if not action_taken:
+            st.error("Por favor, descreva a ação realizada.")
+            return
+
+        with st.spinner("Registrando ação e regularizando status..."):
+            try:
+                mock_results = {}
+                for category, questions in ALARM_CHECKLIST.items():
+                    for question in questions:
+                        mock_results[question] = "Conforme"
+
+                inspection_saved = save_alarm_inspection(
+                    system_id=system_id,
+                    overall_status="Aprovado",
+                    results_dict=mock_results,
+                    photo_file=None,
+                    inspector_name=get_user_display_name()
+                )
+
+                if not inspection_saved:
+                    raise Exception("Falha ao salvar a nova inspeção de regularização.")
+
+                log_saved = save_alarm_action_log(
+                    system_id, problem, action_taken, responsible, photo_evidence)
+
+                if not log_saved:
+                    st.warning("Status do sistema regularizado, mas houve uma falha ao salvar o log detalhado da ação.")
+
+                st.success(
+                    "Ação registrada e status do sistema regularizado com sucesso!")
+                #st.balloons()
+                st.cache_data.clear()
+                st.rerun()
+
+            except Exception as e:
+                st.error(f"Não foi possível concluir a regularização: {e}")
+                st.info("A pendência não foi resolvida. Por favor, tente novamente.")
+
+
+@st.dialog("Registrar Ação Corretiva para Câmara de Espuma")
+def action_dialog_foam_chamber(item_row):
+    chamber_id = item_row['id_camara']
+    problem = item_row['plano_de_acao']
+
+    st.write(f"**Câmara ID:** `{chamber_id}`")
+    st.write(f"**Problema Identificado:** `{problem}`")
+
+    action_taken = st.text_area("Descreva a ação corretiva realizada:")
+    responsible = st.text_input(
+        "Responsável pela ação:", value=get_user_display_name())
+
+    st.markdown("---")
+    st.write("Opcional: Anexe uma foto como evidência da ação concluída.")
+    photo_evidence = st.file_uploader("Foto da Evidência", type=[
+                                      "jpg", "jpeg", "png"], key=f"photo_action_foam_{chamber_id}")
+
+    if st.button("Salvar Ação e Regularizar Status", type="primary"):
+        if not action_taken:
+            st.error("Por favor, descreva a ação realizada.")
+            return
+
+        with st.spinner("Registrando ação e regularizando status..."):
+            try:
+                mock_results = {
+                    q: "Conforme" for q_list in FOAM_CHAMBER_CHECKLIST.values() for q in q_list}
+
+                inspection_saved = save_foam_chamber_inspection(
+                    chamber_id=chamber_id,
+                    inspection_type="Visual Mensal (Regularização)",
+                    overall_status="Aprovado",
+                    results_dict=mock_results,
+                    photo_file=photo_evidence,
+                    inspector_name=get_user_display_name()
+                )
+
+                if not inspection_saved:
+                    raise Exception("Falha ao salvar a nova inspeção de regularização.")
+
+                log_saved = save_foam_chamber_action_log(
+                    chamber_id, problem, action_taken, responsible)
+
+                if not log_saved:
+                    st.warning("Status do equipamento regularizado, mas houve uma falha ao salvar o log detalhado da ação.")
+
+                st.success(
+                    "Ação registrada e status do equipamento regularizado com sucesso!")
+                #st.balloons()
+                st.cache_data.clear()
+                st.rerun()
+
+            except Exception as e:
+                st.error(f"Não foi possível concluir a regularização: {e}")
+                st.info("A pendência não foi resolvida. Por favor, tente novamente.")
+
+
+@st.dialog("Registrar Ação Corretiva para Chuveiro / Lava-Olhos")
+def action_dialog_eyewash(item_row):
+    equipment_id = item_row['id_equipamento']
+    problem = item_row['plano_de_acao']
+
+    st.write(f"**Equipamento ID:** `{equipment_id}`")
+    st.write(f"**Problema Identificado:** `{problem}`")
+
+    action_taken = st.text_area("Descreva a ação corretiva realizada:")
+    responsible = st.text_input(
+        "Responsável pela ação:", value=get_user_display_name())
+
+    st.markdown("---")
+    st.write("Opcional: Anexe uma foto como evidência da ação concluída.")
+    photo_evidence = st.file_uploader(
+        "Foto da Evidência", type=["jpg", "jpeg", "png"])
+
+    if st.button("Salvar Ação e Regularizar Status", type="primary"):
+        if not action_taken:
+            st.error("Por favor, descreva a ação realizada.")
+            return
+
+        with st.spinner("Registrando ação e regularizando status..."):
+            try:
+                mock_results = {
+                    q: "Conforme" for q_list in EYEWASH_CHECKLIST.values() for q in q_list}
+
+                inspection_saved = save_eyewash_inspection(
+                    equipment_id=equipment_id,
+                    overall_status="Aprovado",
+                    results_dict=mock_results,
+                    photo_file=None,
+                    inspector_name=get_user_display_name()
+                )
+
+                if not inspection_saved:
+                    raise Exception("Falha ao salvar a nova inspeção de regularização.")
+
+                log_saved = save_eyewash_action_log(
+                    equipment_id, problem, action_taken, responsible, photo_evidence)
+
+                if not log_saved:
+                    st.warning("Status do equipamento regularizado, mas houve uma falha ao salvar o log detalhado da ação.")
+
+                st.success(
+                    "Ação registrada e status do equipamento regularizado com sucesso!")
+                #st.balloons()
+                st.cache_data.clear()
+                st.rerun()
+
+            except Exception as e:
+                st.error(f"Não foi possível concluir a regularização: {e}")
+                st.info("A pendência não foi resolvida. Por favor, tente novamente.")
+
+
+@st.dialog("Registrar Ação Corretiva para SCBA")
+def action_dialog_scba(equipment_id, problem):
+    st.write(f"**Equipamento S/N:** `{equipment_id}`")
+    st.write(f"**Problema Identificado:** `{problem}`")
+    action_taken = st.text_area("Descreva a ação corretiva realizada:")
+    responsible = st.text_input(
+        "Responsável pela ação:", value=get_user_display_name())
+
+    if st.button("Salvar Ação e Regularizar", type="primary"):
+        if not action_taken:
+            st.error("Por favor, descreva a ação.")
+            return
+        with st.spinner("Registrando..."):
+            try:
+                results = {
+                    "Info": {"Status": "Regularizado via Ação Corretiva", "Ação": action_taken}}
+                inspection_saved = save_scba_visual_inspection(
+                    equipment_id, "Aprovado", results, get_user_display_name())
+
+                if not inspection_saved:
+                    raise Exception("Falha ao salvar a nova inspeção de regularização.")
+
+                log_saved = save_scba_action_log(equipment_id, problem,
+                                     action_taken, responsible)
+                
+                if not log_saved:
+                    st.warning("Status do equipamento regularizado, mas houve uma falha ao salvar o log detalhado da ação.")
+
+                st.success("Ação registrada e status regularizado!")
+                #st.balloons()
+                st.cache_data.clear()
+                st.rerun()
+
+            except Exception as e:
+                st.error(f"Não foi possível concluir a regularização: {e}")
+                st.info("A pendência não foi resolvida. Por favor, tente novamente.")
+
+
+@st.dialog("Registrar Plano de Ação para Abrigo")
+def action_dialog_shelter(shelter_id, problem):
+    st.write(f"**Abrigo ID:** `{shelter_id}`")
+    st.write(f"**Problema Identificado:** `{problem}`")
+
+    action_taken = st.text_area("Descreva a ação corretiva realizada:")
+    responsible = st.text_input(
+        "Responsável pela ação:", value=get_user_display_name())
+
+    st.markdown("---")
+
+    if st.button("Salvar Ação e Regularizar Status", type="primary"):
+        if not action_taken:
+            st.error("Por favor, descreva a ação realizada.")
+            return
+
+        with st.spinner("Registrando ação e regularizando status..."):
+            try:
+                df_shelters = load_sheet_data("abrigos")
+                shelter_inventory_row = df_shelters[df_shelters['id_abrigo'] == shelter_id]
+
+                if shelter_inventory_row.empty:
+                    raise Exception(f"Não foi possível encontrar o inventário original para o abrigo {shelter_id}.")
+
+                try:
+                    items_dict = json.loads(
+                        shelter_inventory_row.iloc[0]['itens_json'])
+
+                    inspection_results = {item: {
+                        "status": "OK", "observacao": "Regularizado via ação corretiva"} for item in items_dict}
+
+                    inspection_results["Condições Gerais"] = {
+                        "Lacre": "Sim", "Sinalização": "Sim", "Acesso": "Sim"
+                    }
+
+                except (json.JSONDecodeError, TypeError):
+                    raise Exception(f"O inventário do abrigo {shelter_id} está corrompido na planilha.")
+
+                inspection_saved = save_shelter_inspection(
+                    shelter_id=shelter_id,
+                    overall_status="Aprovado",
+                    inspection_results=inspection_results,
+                    inspector_name=get_user_display_name()
+                )
+
+                if not inspection_saved:
+                    raise Exception("Falha ao registrar a nova inspeção de regularização.")
+
+                log_saved = save_shelter_action_log(
+                    shelter_id, problem, action_taken, responsible)
+
+                if not log_saved:
+                    st.warning("Status do abrigo regularizado, mas houve uma falha ao salvar o log detalhado da ação.")
+
+                st.success(
+                    "Plano de ação registrado e status do abrigo regularizado com sucesso!")
+                #st.balloons()
+                st.cache_data.clear()
+                st.rerun()
+
+            except Exception as e:
+                st.error(f"Não foi possível concluir a regularização: {e}")
+                st.info("A pendência não foi resolvida. Por favor, tente novamente.")
+
+
+@st.dialog("Registrar Ação Corretiva")
+def action_form(item, df_full_history, location):
+    st.write(f"**Equipamento ID:** `{item['numero_identificacao']}`")
+    st.write(f"**Problema Identificado:** `{item['plano_de_acao']}`")
+
+    st.markdown("### Tipo de Ação")
+    action_type = st.radio(
+        "Selecione o tipo de ação:",
+        ["🔧 Ação Corretiva", "🔄 Substituição", "🗑️ Baixa Definitiva"],
+        help="Escolha a ação apropriada para resolver o problema"
+    )
+
+    st.markdown("---")
+
+    if action_type == "🗑️ Baixa Definitiva":
+        st.warning(
+            "⚠️ **ATENÇÃO:** Você está registrando a **BAIXA DEFINITIVA** deste extintor")
+        st.error(
+            "Esta ação é **IRREVERSÍVEL** e remove o equipamento permanentemente do inventário ativo.")
+
+        condemnation_options = [
+            "Casco danificado irreparavelmente",
+            "Falha no teste hidrostático",
+            "Corrosão severa",
+            "Equipamento obsoleto/descontinuado",
+            "Danos por impacto",
+            "Vazamento não reparável",
+            "Fim da vida útil",
+            "Outro motivo"
+        ]
+
+        condemnation_reason = st.selectbox(
+            "Motivo da Condenação:", condemnation_options)
+
+        if condemnation_reason == "Outro motivo":
+            custom_reason = st.text_input("Especifique o motivo:")
+            final_reason = custom_reason if custom_reason else "Não especificado"
+        else:
+            final_reason = condemnation_reason
+
+        st.markdown("#### Extintor Substituto (OBRIGATÓRIO)")
+        st.info(
+            "Para manter a proteção, é obrigatório informar o extintor que substituirá este equipamento.")
+        substitute_id = st.text_input(
+            "ID do Extintor Substituto:", help="Digite o ID do novo extintor que será instalado no local")
+
+        observations = st.text_area(
+            "Observações Adicionais (opcional):", help="Detalhes técnicos, recomendações, etc.")
+
+        st.markdown("#### Evidência Fotográfica (OBRIGATÓRIA)")
+        st.write("Anexe uma foto do equipamento condenado como evidência:")
+
+        photo_option = st.radio("Método de captura:", [
+                                "📷 Tirar foto agora", "📁 Upload de arquivo"], horizontal=True)
+
+        photo_evidence = None
+        if photo_option == "📷 Tirar foto agora":
+            photo_evidence = st.camera_input(
+                "Foto do equipamento condenado", key=f"disposal_camera_{item['numero_identificacao']}")
+        else:
+            photo_evidence = st.file_uploader("Selecione a foto", type=[
+                                              "jpg", "jpeg", "png"], key=f"disposal_upload_{item['numero_identificacao']}")
+
+        st.markdown("#### Confirmação Final")
+        confirm_disposal = st.checkbox(
+            "✅ Confirmo que este equipamento deve ser BAIXADO DEFINITIVAMENTE do sistema")
+        confirm_substitute = st.checkbox(
+            "✅ Confirmo que o equipamento substituto será instalado imediatamente")
+
+        disposal_disabled = not (
+            confirm_disposal and confirm_substitute and substitute_id and photo_evidence)
+
+        if st.button("🗑️ CONFIRMAR BAIXA DEFINITIVA", type="primary", disabled=disposal_disabled):
+            if not substitute_id:
+                st.error("É obrigatório informar o ID do extintor substituto.")
+                return
+
+            if not photo_evidence:
+                st.error("É obrigatório anexar uma foto como evidência.")
+                return
+
+            with st.spinner("Registrando baixa definitiva..."):
+                from operations.extinguisher_disposal_operations import register_extinguisher_disposal
+
+                success = register_extinguisher_disposal(
+                    equipment_id=item['numero_identificacao'],
+                    condemnation_reason=final_reason,
+                    substitute_id=substitute_id,
+                    observations=observations,
+                    photo_evidence=photo_evidence
+                )
+
+                if success:
+                    st.success(
+                        f"✅ Extintor {item['numero_identificacao']} baixado definitivamente!")
+                    st.success(
+                        f"🔄 Lembre-se de instalar o substituto {substitute_id} no local.")
+                    #st.balloons()
+                    st.cache_data.clear()
+                    st.rerun()
+                else:
+                    st.error("❌ Falha ao registrar a baixa. Tente novamente.")
+
+    else:
+        acao_realizada = st.text_area("Descreva a ação corretiva realizada:")
+        responsavel_acao = st.text_input(
+            "Responsável pela ação:", value=get_user_display_name())
+
+        id_substituto = None
+        if action_type == "🔄 Substituição":
+            st.markdown("#### Equipamento Substituto (OBRIGATÓRIO)")
+            st.info("Informe o ID do extintor que substituirá este equipamento.")
+            id_substituto = st.text_input(
+                "ID do Equipamento Substituto:", help="Digite o ID do novo extintor")
+        else:
+            st.markdown("#### Equipamento Substituto (Opcional)")
+            id_substituto = st.text_input(
+                "ID do Equipamento Substituto (Opcional)")
+
+        st.markdown("---")
+        st.write("Opcional: Anexe uma foto como evidência da ação concluída.")
+        photo_evidence = None
+        if st.toggle("📷 Anexar foto de evidência da correção", key=f"toggle_photo_{item['numero_identificacao']}"):
+            st.write("**Opção 1: Tirar Foto Agora (Qualidade Menor)**")
+            camera_photo = st.camera_input(
+                "Câmera", label_visibility="collapsed", key=f"ac_camera_{item['numero_identificacao']}")
+
+            st.markdown("---")
+            st.write("**Opção 2: Enviar da Galeria (Qualidade Alta)**")
+            gallery_photo = st.file_uploader("Galeria", type=[
+                                             "jpg", "jpeg", "png"], label_visibility="collapsed", key=f"ac_uploader_{item['numero_identificacao']}")
+
+            if gallery_photo:
+                photo_evidence = gallery_photo
+            else:
+                photo_evidence = camera_photo
+
+        action_disabled = False
+        if action_type == "🔄 Substituição" and not id_substituto:
+            st.error(
+                "Para substituição, é obrigatório informar o ID do equipamento substituto.")
+            action_disabled = True
+        elif not acao_realizada:
+            action_disabled = True
+
+        if st.button("💾 Salvar Ação", type="primary", disabled=action_disabled):
+            if not acao_realizada:
+                st.error("Por favor, descreva a ação realizada.")
+                return
+
+            original_record = find_last_record(
+                df_full_history, item['numero_identificacao'], 'numero_identificacao')
+            if id_substituto:
+                df_locais = load_sheet_data("locais")
+                if not df_locais.empty:
+                    df_locais['id'] = df_locais['id'].astype(str)
+                    original_location_info = df_locais[df_locais['id']
+                                                       == original_record['numero_identificacao']]
+                    if original_location_info.empty or pd.isna(original_location_info.iloc[0]['local']):
+                        st.error(
+                            "Erro: O equipamento original não tem um local definido na aba 'locais', portanto a substituição não pode ser concluída.")
+                        return
+                else:
+                    st.error(
+                        "Erro: A aba 'locais' não foi encontrada ou está vazia.")
+                    return
+
+            with st.spinner("Processando ação..."):
+                photo_link_evidence = upload_evidence_photo(
+                    photo_evidence,
+                    item['numero_identificacao'],
+                    "acao_corretiva"
+                )
+
+                substitute_last_record = {}
+                if id_substituto:
+                    substitute_last_record = find_last_record(
+                        df_full_history, id_substituto, 'numero_identificacao') or {}
+                    if not substitute_last_record:
+                        st.info(
+                            f"Aviso: Equipamento substituto com ID '{id_substituto}' não tem histórico. Será criado um novo registro.")
+
+                action_details = {
+                    'acao_realizada': acao_realizada,
+                    'responsavel_acao': responsavel_acao,
+                    'id_substituto': id_substituto if id_substituto else None,
+                    'location': location,
+                    'photo_link': photo_link_evidence
+                }
+
+                if save_corrective_action(original_record, substitute_last_record, action_details, get_user_display_name()):
+                    if action_type == "🔄 Substituição":
+                        st.success("Substituição registrada com sucesso!")
+                    else:
+                        st.success("Ação corretiva registrada com sucesso!")
+                    st.cache_data.clear()
+                    st.rerun()
+                else:
+                    st.error("Falha ao registrar a ação.")
+
+
+def show_page():
+
+    st.title("Situação Atual dos Equipamentos de Emergência")
+
+    if st.button("Limpar Cache e Recarregar Dados"):
+        st.cache_data.clear()
+        st.rerun()
+
+    tab_help, tab_extinguishers, tab_hoses, tab_shelters, tab_scba, tab_eyewash, tab_foam, tab_multigas, tab_alarms, tab_canhoes = st.tabs([
+        "📘 Como Usar", "🔥 Extintores", "💧 Mangueiras", "🧯 Abrigos", "💨 C. Autônomo",
+        "🚿 Chuveiros/Lava-Olhos", "☁️ Câmaras de Espuma", "💨 Multigás", "🔔 Alarmes", "🌊 Canhões Monitores"
+    ])
+
+    location = streamlit_js_eval(js_expressions="""
+        new Promise(function(resolve, reject) {
+            navigator.geolocation.getCurrentPosition(
+                function(position) { resolve({ latitude: position.coords.latitude, longitude: position.coords.longitude }); },
+                function(error) { resolve(null); }
+            );
+        });
+    """)
+
+    with tab_help:
+        instru_dash()
+
+    with tab_extinguishers:
+        st.header("Dashboard de Extintores")
+
+        if is_admin():
+            with st.expander("⚙️ Ações de Administrador"):
+                st.warning(
+                    "Esta ação criará um registro de inspeção 'Aprovado' com a data de hoje para TODOS os extintores com inspeção mensal vencida.")
+                if st.button("Regularizar Todas as Inspeções Mensais Vencidas", type="primary"):
+                    with st.spinner("Verificando e regularizando extintores..."):
+                        df_history_for_action = load_sheet_data("extintores")
+                        num_regularized = batch_regularize_monthly_inspections(
+                            df_history_for_action)
+
+                        if num_regularized > 0:
+                            st.success(
+                                f"{num_regularized} extintores foram regularizados com sucesso!")
+                            #st.balloons()
+                            st.cache_data.clear()
+                            st.rerun()
+                        elif num_regularized == 0:
+                            pass
+                        else:
+                            st.error(
+                                "A operação de regularização falhou. Verifique os logs.")
+
+        with st.expander("📄 Gerar Relatório Mensal..."):
+            show_monthly_report_interface()
+        st.markdown("---")
+
+        df_full_history = load_sheet_data("extintores")
+        df_locais = load_sheet_data("locais")
+
+        if df_full_history.empty:
+            st.warning("Ainda não há registros de inspeção para exibir.")
+            return
+
+        with st.spinner("Analisando o status de todos os extintores..."):
+            dashboard_df = get_consolidated_status_df(
+                df_full_history, df_locais)
+
+        if dashboard_df.empty:
+            st.warning(
+                "Não foi possível gerar o dashboard ou não há equipamentos ativos.")
+            return
+
+        status_counts = dashboard_df['status_atual'].value_counts()
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("✅ Total Ativo", len(dashboard_df))
+        col2.metric("🟢 OK", status_counts.get("OK", 0))
+        col3.metric("🔴 VENCIDO", status_counts.get("VENCIDO", 0))
+        col4.metric("🟠 NÃO CONFORME", status_counts.get(
+            "NÃO CONFORME (Aguardando Ação)", 0))
+        st.markdown("---")
+
+        status_filter = st.multiselect("Filtrar por Status:", options=sorted(
+            dashboard_df['status_atual'].unique()), default=sorted(dashboard_df['status_atual'].unique()))
+        filtered_df = dashboard_df[dashboard_df['status_atual'].isin(
+            status_filter)]
+
+        st.subheader("Lista de Equipamentos")
+
+        if filtered_df.empty:
+            st.info("Nenhum item corresponde ao filtro selecionado.")
+        else:
+            for index, row in filtered_df.iterrows():
+                status_icon = "🟢" if row['status_atual'] == 'OK' else (
+                    '🔴' if row['status_atual'] == 'VENCIDO' else '🟠')
+
+                expander_title = f"{status_icon} **ID:** {row['numero_identificacao']} | **Tipo:** {row['tipo_agente']} | **Status:** {row['status_atual']} | **Localização:** {row['status_instalacao']}"
+
+                with st.expander(expander_title):
+                    st.markdown(
+                        f"**Plano de Ação Sugerido:** {row['plano_de_acao']}")
+                    st.markdown("---")
+                    st.subheader("Próximos Vencimentos:")
+
+                    col_venc1, col_venc2, col_venc3 = st.columns(3)
+                    col_venc1.metric("Inspeção Mensal",
+                                     value=row['prox_venc_inspecao'].strftime('%d/%m/%Y') if pd.notna(row['prox_venc_inspecao']) else "N/A")
+                    col_venc2.metric("Manutenção Nível 2",
+                                     value=row['prox_venc_maint2'].strftime('%d/%m/%Y') if pd.notna(row['prox_venc_maint2']) else "N/A")
+                    col_venc3.metric("Manutenção Nível 3",
+                                     value=row['prox_venc_maint3'].strftime('%d/%m/%Y') if pd.notna(row['prox_venc_maint3']) else "N/A")
+
+                    st.caption(
+                        f"Último Selo INMETRO registrado: {row.get('numero_selo_inmetro', 'N/A')}")
+
+                    st.markdown("---")
+                    st.subheader("📸 Evidências Fotográficas")
+
+                    ext_id = row['numero_identificacao']
+                    ext_history = df_full_history[df_full_history['numero_identificacao'] == ext_id].sort_values(
+                        'data_servico', ascending=False)
+
+                    if not ext_history.empty:
+                        latest_full_record = ext_history.iloc[0]
+                        photo_link = latest_full_record.get(
+                            'link_foto_nao_conformidade')
+
+                        if photo_link and pd.notna(photo_link) and str(photo_link).strip() != '':
+                            display_storage_image(
+                                photo_link, caption="Foto da Não Conformidade", width=400)
+                        else:
+                            st.info(
+                                "Nenhuma foto de não conformidade registrada para este equipamento.")
+                    else:
+                        st.info("Sem histórico fotográfico disponível.")
+
+                    if row['status_atual'] != 'OK':
+                        st.markdown("---")
+                        if st.button("✍️ Registrar Ação Corretiva", key=f"action_ext_{index}", use_container_width=True):
+                            action_form(row.to_dict(),
+                                        df_full_history, location)
+
+    with tab_hoses:
+        st.header("Dashboard de Mangueiras de Incêndio")
+
+        df_hoses_history = load_sheet_data("mangueiras")
+        df_disposals = load_sheet_data("baixas_mangueiras")
+
+        if df_hoses_history.empty:
+            st.warning(
+                "Ainda não há registros de inspeção de mangueiras para exibir no dashboard.")
+        else:
+            dashboard_df_hoses = get_hose_status_df(
+                df_hoses_history, df_disposals)
+
+            status_counts = dashboard_df_hoses['status'].value_counts()
+            col1, col2, col3, col4 = st.columns(4)
+            col1.metric("✅ Total Ativas", len(dashboard_df_hoses))
+            col2.metric("🟢 OK", status_counts.get("🟢 OK", 0))
+            col3.metric("🔴 VENCIDO", status_counts.get("🔴 VENCIDO", 0))
+            col4.metric("🟠 REPROVADA", status_counts.get("🟠 REPROVADA", 0))
+
+            st.markdown("---")
+
+            st.subheader("Lista de Mangueiras Ativas")
+
+            for _, row in dashboard_df_hoses.iterrows():
+                if row['status'] == '🟠 REPROVADA':
+                    with st.container(border=True):
+                        cols = st.columns([5, 2])
+                        with cols[0]:
+                            st.markdown(
+                                f"**ID:** {row['id_mangueira']} | **Status:** {row['status']} | **Próx. Teste:** {row['data_proximo_teste']}")
+                        with cols[1]:
+                            if st.button("🗑️ Registrar Baixa", key=f"dispose_{row['id_mangueira']}", use_container_width=True):
+                                dispose_hose_dialog(row['id_mangueira'])
+                else:
+                    st.text(
+                        f"ID: {row['id_mangueira']} | Status: {row['status']} | Próx. Teste: {row['data_proximo_teste']}")
+
+            with st.expander("Ver tabela completa de mangueiras ativas"):
+                st.dataframe(
+                    dashboard_df_hoses,
+                    column_config={
+                        "id_mangueira": "ID", "status": "Status", "marca": "Marca",
+                        "diametro": "Diâmetro", "tipo": "Tipo", "comprimento": "Comprimento",
+                        "ano_fabricacao": "Ano Fab.",
+                        # Use column_config para formatar a data na exibição
+                        "data_inspecao": st.column_config.DateColumn(
+                            "Último Teste", format="DD/MM/YYYY"
+                        ),
+                        "data_proximo_teste": st.column_config.DateColumn(
+                            "Próximo Teste", format="DD/MM/YYYY"
+                        ),
+                        "registrado_por": "Registrado Por",
+                        "link_certificado_pdf": st.column_config.LinkColumn(
+                            "Certificado", display_text="🔗 Ver PDF"
+                        )
+                    },
+                    hide_index=True,
+                    use_container_width=True
+                )
+
+    with tab_shelters:
+        st.header("Dashboard de Status dos Abrigos de Emergência")
+
+        df_shelters_registered = load_sheet_data("abrigos")
+        df_inspections_history = load_sheet_data("inspecoes_abrigos")
+        df_action_log = load_sheet_data("log_acoes_abrigos")
+
+        if df_shelters_registered.empty:
+            st.warning("Nenhum abrigo de emergência cadastrado.")
+        else:
+            st.info("Aqui está o status de todos os abrigos. Gere um relatório de status completo para impressão ou registre ações corretivas.")
+            if st.button("📄 Gerar Relatório de Status em PDF", type="primary"):
+                report_html = generate_shelters_html(
+                    df_shelters_registered, df_inspections_history, df_action_log)
+                js_code = f"""
+                    const reportHtml = {json.dumps(report_html)};
+                    const printWindow = window.open('', '_blank');
+                    if (printWindow) {{
+                        printWindow.document.write(reportHtml);
+                        printWindow.document.close();
+                        printWindow.focus();
+                        setTimeout(() => {{ printWindow.print(); printWindow.close(); }}, 500);
+                    }} else {{
+                        alert('Por favor, desabilite o bloqueador de pop-ups para este site.');
+                    }}
+                """
+                streamlit_js_eval(js_expressions=js_code,
+                                  key="print_shelters_js")
+                st.success("Relatório de status enviado para impressão!")
+            st.markdown("---")
+
+            dashboard_df_shelters = get_shelter_status_df(
+                df_shelters_registered, df_inspections_history)
+
+            status_counts = dashboard_df_shelters['status_dashboard'].value_counts(
+            )
+            ok_count = status_counts.get(
+                "🟢 OK", 0) + status_counts.get("🟢 OK (Ação Realizada)", 0)
+            pending_count = status_counts.get(
+                "🟠 COM PENDÊNCIAS", 0) + status_counts.get("🔵 PENDENTE (Nova Inspeção)", 0)
+            col1, col2, col3, col4 = st.columns(4)
+            col1.metric("✅ Total de Abrigos", len(dashboard_df_shelters))
+            col2.metric("🟢 OK", ok_count)
+            col3.metric("🟠 Pendentes", pending_count)
+            col4.metric("🔴 Vencido", status_counts.get("🔴 VENCIDO", 0))
+            st.markdown("---")
+
+            st.subheader("Lista de Abrigos e Status")
+            for _, row in dashboard_df_shelters.iterrows():
+                status = row['status_dashboard']
+                prox_inspecao_str = row['data_proxima_inspecao'].strftime('%d/%m/%Y') if pd.notna(row['data_proxima_inspecao']) else 'N/A'
+                local_info = row.get('local', 'N/A')
+                expander_title = f"{status} | **ID:** {row['id_abrigo']} | **Local:** {local_info} | **Próx. Inspeção:** {prox_inspecao_str}"
+
+                with st.expander(expander_title):
+                    data_inspecao_str = row['data_inspecao'].strftime('%d/%m/%Y') if pd.notna(row['data_inspecao']) else 'N/A'
+                    st.write(
+                        f"**Última inspeção:** {data_inspecao_str} por **{row['inspetor']}**")
+                    st.write(
+                        f"**Resultado da última inspeção:** {row.get('status_geral', 'N/A')}")
+
+                    if status not in ["🟢 OK", "🟢 OK (Ação Realizada)"]:
+                        problem_description = status.replace(
+                            "🔴 ", "").replace("🟠 ", "").replace("🔵 ", "")
+                        if st.button("✍️ Registrar Ação", key=f"action_{row['id_abrigo']}", use_container_width=True):
+                            action_dialog_shelter(
+                                row['id_abrigo'], problem_description)
+
+                    st.markdown("---")
+                    st.write("**Detalhes da Última Inspeção:**")
+
+                    try:
+                        results_dict = json.loads(row['resultados_json'])
+
+                        if results_dict:
+                            general_conditions = results_dict.pop(
+                                'Condições Gerais', {})
+
+                            if results_dict:
+                                st.write("**Itens do Inventário:**")
+                                items_df = pd.DataFrame.from_dict(
+                                    results_dict, orient='index')
+                                st.table(items_df)
+
+                            if general_conditions:
+                                st.write("**Condições Gerais do Abrigo:**")
+                                cols = st.columns(len(general_conditions))
+                                for i, (key, value) in enumerate(general_conditions.items()):
+                                    with cols[i]:
+                                        st.metric(label=key, value=value)
+
+                        else:
+                            st.info("Nenhum detalhe de inspeção disponível.")
+
+                    except (json.JSONDecodeError, TypeError):
+                        st.error(
+                            "Não foi possível carregar os detalhes desta inspeção (formato inválido).")
+
+    with tab_scba:
+        st.header("Dashboard de Status dos Conjuntos Autônomos")
+
+        df_scba_main = load_sheet_data("conjuntos_autonomos")
+        df_scba_visual = load_sheet_data("inspecoes_scba")
+
+        if df_scba_main.empty:
+            st.warning("Nenhum teste de equipamento (Posi3) registrado.")
+        else:
+            dashboard_df = get_scba_status_df(df_scba_main, df_scba_visual)
+
+            if dashboard_df.empty:
+                st.info("Não há equipamentos SCBA para exibir no dashboard.")
+            else:
+                status_counts = dashboard_df['status_consolidado'].value_counts(
+                )
+                col1, col2, col3, col4 = st.columns(4)
+                col1.metric("✅ Total", len(dashboard_df))
+                col2.metric("🟢 OK", status_counts.get("🟢 OK", 0))
+                col3.metric("🟠 Pendências", status_counts.get(
+                    "🟠 COM PENDÊNCIAS", 0))
+                col4.metric("🔴 Vencidos", status_counts.get(
+                    "🔴 VENCIDO (Teste Posi3)", 0) + status_counts.get("🔴 VENCIDO (Insp. Periódica)", 0))
+                st.markdown("---")
+
+                for _, row in dashboard_df.iterrows():
+                    val_teste_str = pd.to_datetime(row['data_validade']).strftime(
+                        '%d/%m/%Y') if pd.notna(row['data_validade']) else 'N/A'
+                    prox_insp_str = pd.to_datetime(row['data_proxima_inspecao']).strftime(
+                        '%d/%m/%Y') if pd.notna(row['data_proxima_inspecao']) else 'N/A'
+                    status = row['status_consolidado']
+                    expander_title = f"{status} | **S/N:** {row['numero_serie_equipamento']} | **Val. Teste:** {val_teste_str} | **Próx. Insp.:** {prox_insp_str}"
+
+                    with st.expander(expander_title):
+                        data_insp_str = pd.to_datetime(row.get('data_inspecao')).strftime(
+                            '%d/%m/%Y') if pd.notna(row.get('data_inspecao')) else 'N/A'
+                        st.write(
+                            f"**Última Inspeção Periódica:** {data_insp_str} - **Status:** {row.get('status_geral', 'N/A')}")
+
+                        if status != "🟢 OK":
+                            if st.button("✍️ Registrar Plano de Ação", key=f"action_scba_{row['numero_serie_equipamento']}", use_container_width=True):
+                                action_dialog_scba(
+                                    row['numero_serie_equipamento'], status)
+
+                        st.markdown(
+                            "**Detalhes da Última Inspeção Periódica:**")
+                    try:
+                        results_json = row.get('resultados_json')
+                        if results_json and pd.notna(results_json):
+                            results = json.loads(results_json)
+
+                            with st.expander("Ver detalhes da inspeção"):
+
+                                st.markdown("""
+                                <style>
+                                .small-font {
+                                    font-size:0.9rem;
+                                    line-height: 1.2;
+                                }
+                                </style>
+                                """, unsafe_allow_html=True)
+
+                                st.markdown(
+                                    "<p class='small-font' style='font-weight: bold;'>Testes Funcionais</p>", unsafe_allow_html=True)
+                                testes = results.get("Testes Funcionais", {})
+                                if testes:
+                                    cols_testes = st.columns(len(testes))
+                                    for i, (teste, resultado) in enumerate(testes.items()):
+                                        icon = "✅" if resultado == "Aprovado" else "❌"
+                                        cols_testes[i].markdown(
+                                            f"<p class='small-font'><b>{teste}</b><br>{icon} {resultado}</p>", unsafe_allow_html=True)
+
+                                st.markdown(
+                                    "<p class='small-font' style='font-weight: bold; margin-top: 10px;'>Checklist Visual</p>", unsafe_allow_html=True)
+                                col_cilindro, col_mascara = st.columns(2)
+
+                                with col_cilindro:
+                                    st.markdown(
+                                        "<p class='small-font'><b>Cilindro de Ar</b></p>", unsafe_allow_html=True)
+                                    cilindro_itens = results.get(
+                                        "Cilindro", {})
+                                    obs_cilindro = cilindro_itens.pop(
+                                        "Observações", "")
+                                    for item, status in cilindro_itens.items():
+                                        icon = "✔️" if status == "C" else (
+                                            "❌" if status == "N/C" else "➖")
+                                        st.markdown(
+                                            f"<p class='small-font'>{icon} {item}</p>", unsafe_allow_html=True)
+                                    if obs_cilindro:
+                                        st.markdown(
+                                            f"<p class='small-font' style='font-style: italic;'>Obs: {obs_cilindro}</p>", unsafe_allow_html=True)
+
+                                with col_mascara:
+                                    st.markdown(
+                                        "<p class='small-font'><b>Máscara Facial</b></p>", unsafe_allow_html=True)
+                                    mascara_itens = results.get("Mascara", {})
+                                    obs_mascara = mascara_itens.pop(
+                                        "Observações", "")
+                                    for item, status in mascara_itens.items():
+                                        icon = "✔️" if status == "C" else (
+                                            "❌" if status == "N/C" else "➖")
+                                        st.markdown(
+                                            f"<p class='small-font'>{icon} {item}</p>", unsafe_allow_html=True)
+                                    if obs_mascara:
+                                        st.markdown(
+                                            f"<p class='small-font' style='font-style: italic;'>Obs: {obs_mascara}</p>", unsafe_allow_html=True)
+
+                        else:
+                            st.info(
+                                "Nenhum detalhe de inspeção periódica encontrado.")
+                    except (json.JSONDecodeError, TypeError, AttributeError):
+                        st.info(
+                            "Nenhum detalhe de inspeção periódica encontrado.")
+
+    with tab_eyewash:
+        st.header("Dashboard de Chuveiros e Lava-Olhos")
+
+        df_eyewash_history = load_sheet_data("inspecoes_chuveiros_lava_olhos")
+
+        if df_eyewash_history.empty:
+            st.warning("Nenhuma inspeção de chuveiro/lava-olhos registrada.")
+        else:
+            dashboard_df = get_eyewash_status_df(df_eyewash_history)
+
+            status_counts = dashboard_df['status_dashboard'].value_counts()
+            col1, col2, col3, col4 = st.columns(4)
+            col1.metric("✅ Total de Equipamentos", len(dashboard_df))
+            col2.metric("🟢 OK", status_counts.get("🟢 OK", 0))
+            col3.metric("🟠 Com Pendências",
+                        status_counts.get("🟠 COM PENDÊNCIAS", 0))
+            col4.metric("🔴 Vencido", status_counts.get("🔴 VENCIDO", 0))
+            st.markdown("---")
+
+            st.subheader("Lista de Equipamentos e Status")
+            for _, row in dashboard_df.iterrows():
+                status = row['status_dashboard']
+                prox_inspecao = pd.to_datetime(row['data_proxima_inspecao']).strftime(
+                    '%d/%m/%Y') if pd.notna(row['data_proxima_inspecao']) else "N/A"
+                expander_title = f"{status} | **ID:** {row['id_equipamento']} | **Próx. Inspeção:** {prox_inspecao}"
+
+                with st.expander(expander_title):
+                    ultima_inspecao = pd.to_datetime(row['data_inspecao']).strftime(
+                        '%d/%m/%Y') if pd.notna(row['data_inspecao']) else "N/A"
+                    st.write(
+                        f"**Última inspeção:** {ultima_inspecao} por **{row['inspetor']}**")
+                    st.write(
+                        f"**Plano de Ação Sugerido:** {row.get('plano_de_acao', 'N/A')}")
+
+                    if status == "🟠 COM PENDÊNCIAS":
+                        if st.button("✍️ Registrar Ação Corretiva", key=f"action_eyewash_{row['id_equipamento']}"):
+                            action_dialog_eyewash(row.to_dict())
+
+                    st.markdown("---")
+                    st.write("**Detalhes da Última Inspeção:**")
+                    try:
+                        results_json = row.get('resultados_json')
+                        if results_json and pd.notna(results_json):
+                            results = json.loads(results_json)
+                            non_conformities = {q: status for q, status in results.items() if str(
+                                status).upper() == "NÃO CONFORME"}
+
+                            if non_conformities:
+                                st.write("Itens não conformes encontrados:")
+                                st.table(pd.DataFrame.from_dict(
+                                    non_conformities, orient='index', columns=['Status']))
+                            else:
+                                st.success(
+                                    "Todos os itens estavam conformes na última inspeção.")
+                        else:
+                            st.info("Nenhum detalhe de inspeção disponível.")
+
+                        photo_link = row.get('link_foto_nao_conformidade')
+                        display_storage_image(
+                            photo_link, caption="Foto da Não Conformidade", width=300)
+
+                    except (json.JSONDecodeError, TypeError):
+                        st.error(
+                            "Não foi possível carregar os detalhes da inspeção (formato de dados inválido).")
+
+    with tab_foam:
+        st.header("Dashboard de Câmaras de Espuma")
+
+        df_foam_inventory = load_sheet_data("inventario_camaras_espuma")
+        df_foam_history = load_sheet_data("inspecoes_camaras_espuma")
+
+        if df_foam_history.empty:
+            st.warning("Nenhuma inspeção de câmara de espuma registrada.")
+        else:
+            dashboard_df = get_foam_chamber_status_df(df_foam_history)
+
+            if not df_foam_inventory.empty:
+                dashboard_df = pd.merge(
+                    dashboard_df,
+                    df_foam_inventory[['id_camara', 'localizacao', 'modelo']],
+                    on='id_camara',
+                    how='left'
+                )
+            else:
+                dashboard_df['localizacao'] = 'Localização não definida'
+                dashboard_df['modelo'] = 'N/A'
+
+            dashboard_df['localizacao'] = dashboard_df['localizacao'].fillna(
+                'Localização não definida')
+
+            status_counts = dashboard_df['status_dashboard'].value_counts()
+            col1, col2, col3, col4 = st.columns(4)
+            col1.metric("✅ Total de Câmaras", len(dashboard_df))
+            col2.metric("🟢 OK", status_counts.get("🟢 OK", 0))
+            col3.metric("🟠 Com Pendências",
+                        status_counts.get("🟠 COM PENDÊNCIAS", 0))
+            col4.metric("🔴 Vencido", status_counts.get("🔴 VENCIDO", 0))
+            st.markdown("---")
+
+            st.subheader("Status dos Equipamentos por Localização")
+
+            grouped_by_location = dashboard_df.groupby('localizacao')
+
+            for location, group_df in grouped_by_location:
+                location_status_counts = group_df['status_dashboard'].value_counts(
+                )
+                ok_count = location_status_counts.get("🟢 OK", 0)
+                pending_count = location_status_counts.get(
+                    "🟠 COM PENDÊNCIAS", 0)
+                expired_count = location_status_counts.get("🔴 VENCIDO", 0)
+
+                expander_title = f"📍 **Local:** {location}  |  (🟢{ok_count} OK, 🟠{pending_count} Pendente, 🔴{expired_count} Vencido)"
+
+                with st.expander(expander_title):
+                    for _, row in group_df.iterrows():
+                        status = row['status_dashboard']
+                        modelo = row.get('modelo', 'N/A')
+                        ultima_inspecao_str = pd.to_datetime(row['data_inspecao']).strftime(
+                            '%d/%m/%Y') if pd.notna(row['data_inspecao']) else "N/A"
+                        prox_inspecao_str = pd.to_datetime(row['data_proxima_inspecao']).strftime(
+                            '%d/%m/%Y') if pd.notna(row['data_proxima_inspecao']) else "N/A"
+
+                        with st.container(border=True):
+                            st.markdown(
+                                f"##### {status} | **ID:** {row['id_camara']} | **Modelo:** {modelo}")
+
+                            cols = st.columns(3)
+                            cols[0].metric("Última Inspeção",
+                                           ultima_inspecao_str)
+                            cols[1].metric("Próxima Inspeção",
+                                           prox_inspecao_str)
+                            cols[2].metric("Tipo da Última Insp.",
+                                           row.get('tipo_inspecao', 'N/A'))
+
+                            st.write(
+                                f"**Plano de Ação Sugerido:** {row['plano_de_acao']}")
+
+                            if status == "🟠 COM PENDÊNCIAS":
+                                if st.button("✍️ Registrar Ação Corretiva", key=f"action_foam_{row['id_camara']}", use_container_width=True):
+                                    action_dialog_foam_chamber(row.to_dict())
+
+                            with st.expander("Ver detalhes da última inspeção"):
+                                try:
+                                    results = json.loads(
+                                        row['resultados_json'])
+                                    non_conformities = {q: status_item for q, status_item in results.items(
+                                    ) if status_item == "Não Conforme"}
+
+                                    if non_conformities:
+                                        st.write(
+                                            "**Itens não conformes encontrados:**")
+                                        st.table(pd.DataFrame.from_dict(
+                                            non_conformities, orient='index', columns=['Status']))
+                                    else:
+                                        st.success(
+                                            "Todos os itens estavam conformes na última inspeção.")
+
+                                    st.markdown("---")
+                                    photo_link = row.get(
+                                        'link_foto_nao_conformidade')
+                                    display_storage_image(
+                                        photo_link, caption="Foto", width=300)
+
+                                except (json.JSONDecodeError, TypeError) as e:
+                                    st.error(
+                                        f"Não foi possível carregar os detalhes da inspeção: {e}")
+
+    with tab_multigas:
+        st.header("Dashboard de Detectores Multigás")
+        df_inventory = load_sheet_data("inventario_multigas")
+        df_inspections = load_sheet_data("inspecoes_multigas")
+
+        if df_inventory.empty:
+            st.warning("Nenhum detector multigás cadastrado.")
+        else:
+            dashboard_df = get_multigas_status_df(df_inventory, df_inspections)
+
+            total_equip = len(dashboard_df)
+            calib_ok = (dashboard_df['status_calibracao'] == '🟢 OK').sum()
+            bump_ok = (dashboard_df['status_bump_test'] == '🟢 OK').sum()
+
+            col1, col2, col3 = st.columns(3)
+            col1.metric("✅ Total de Detectores", total_equip)
+            col2.metric("🗓️ Calibração Anual OK",
+                        f"{calib_ok} / {total_equip}")
+            col3.metric("💨 Bump Test OK", f"{bump_ok} / {total_equip}")
+            st.markdown("---")
+
+            st.subheader("Lista de Detectores e Status")
+            for _, row in dashboard_df.iterrows():
+
+                status_calibracao = row['status_calibracao']
+                status_bump = row['status_bump_test']
+
+                geral_icon = "🟢"
+                if "🔴" in status_calibracao or "🟠" in status_bump:
+                    geral_icon = "🔴" if "🔴" in status_calibracao else "🟠"
+                elif "🔵" in status_calibracao or "🔵" in status_bump:
+                    geral_icon = "🔵"
+
+                prox_calibracao_str = pd.to_datetime(row['proxima_calibracao']).strftime(
+                    '%d/%m/%Y') if pd.notna(row['proxima_calibracao']) else "N/A"
+
+                expander_title = f"{geral_icon} **ID:** {row['id_equipamento']} | **S/N:** {row['numero_serie']}"
+
+                with st.expander(expander_title):
+                    st.write(
+                        f"**Marca/Modelo:** {row.get('marca', 'N/A')} / {row.get('modelo', 'N/A')}")
+
+                    cols = st.columns(2)
+                    with cols[0]:
+                        st.subheader("Status da Calibração Anual")
+                        st.markdown(f"**Status:** {status_calibracao}")
+                        st.markdown(
+                            f"**Próxima Calibração:** {prox_calibracao_str}")
+                        if status_calibracao != '🟢 OK':
+                            st.warning(
+                                f"**Ação:** Realizar calibração anual do equipamento.")
+
+                    with cols[1]:
+                        st.subheader("Status do Último Bump Test")
+                        ultimo_bump_str = pd.to_datetime(row['data_ultimo_bump_test']).strftime(
+                            '%d/%m/%Y') if pd.notna(row['data_ultimo_bump_test']) else "N/A"
+                        st.markdown(f"**Status:** {status_bump}")
+                        st.markdown(
+                            f"**Data do Último Teste:** {ultimo_bump_str}")
+                        if status_bump == '🟠 REPROVADO':
+                            st.error(
+                                f"**Ação:** Equipamento reprovado. Enviar para manutenção/calibração.")
+                        elif status_bump == '🔵 PENDENTE':
+                            st.info(
+                                f"**Ação:** Realizar novo teste de resposta.")
+
+                    if geral_icon != "🟢":
+                        if st.button("✍️ Registrar Ação Corretiva", key=f"action_multigas_{row['id_equipamento']}"):
+                            action_dialog_multigas(row.to_dict())
+
+                    if pd.notna(row.get('link_certificado')):
+                        st.markdown(
+                            f"**[🔗 Ver Último Certificado de Calibração]({row.get('link_certificado')})**")
+
+    with tab_alarms:
+        st.header("Dashboard de Sistemas de Alarme")
+
+        try:
+            df_alarm_inspections = load_sheet_data("inspecoes_alarmes")
+            df_alarm_inventory = load_sheet_data("inventario_alarmes")
+
+            if df_alarm_inspections.empty and df_alarm_inventory.empty:
+                st.warning("Nenhum sistema de alarme ou inspeção cadastrada.")
+                st.info(
+                    "Cadastre sistemas de alarme na aba 'Alarmes' do menu principal.")
+            elif df_alarm_inspections.empty:
+                st.warning("Nenhuma inspeção de sistema de alarme registrada.")
+            else:
+                with st.expander("📄 Gerar Relatório de Inspeções", expanded=False):
+                    df_alarm_inspections['data_inspecao_dt'] = pd.to_datetime(
+                        df_alarm_inspections['data_inspecao'], errors='coerce')
+
+                    col_type, col_rest = st.columns([1, 3])
+                    with col_type:
+                        report_type = st.radio(
+                            "Tipo de Relatório:",
+                            ["📅 Mensal", "📆 Semestral"],
+                            key="dashboard_alarm_report_type"
+                        )
+
+                    with col_rest:
+                        today = datetime.now()
+
+                        if report_type == "📅 Mensal":
+                            col1, col2 = st.columns(2)
+
+                            with col1:
+                                years_with_data = sorted(
+                                    df_alarm_inspections['data_inspecao_dt'].dt.year.unique(), reverse=True)
+                                if not years_with_data:
+                                    years_with_data = [today.year]
+                                selected_year = st.selectbox(
+                                    "Selecione o Ano:", years_with_data, key="dashboard_alarm_report_year")
+
+                            with col2:
+                                months = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+                                          "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"]
+                                default_month_index = today.month - 1
+                                selected_month_name = st.selectbox("Selecione o Mês:", months,
+                                                                   index=default_month_index, key="dashboard_alarm_report_month")
+
+                            selected_month_number = months.index(
+                                selected_month_name) + 1
+
+                            inspections_selected = df_alarm_inspections[
+                                (df_alarm_inspections['data_inspecao_dt'].dt.year == selected_year) &
+                                (df_alarm_inspections['data_inspecao_dt'].dt.month ==
+                                 selected_month_number)
+                            ].sort_values(by='data_inspecao_dt')
+
+                            period_description = f"{selected_month_name}/{selected_year}"
+                            period_type = "monthly"
+
+                        else:  # Semestral
+                            col1, col2 = st.columns(2)
+
+                            with col1:
+                                years_with_data = sorted(
+                                    df_alarm_inspections['data_inspecao_dt'].dt.year.unique(), reverse=True)
+                                if not years_with_data:
+                                    years_with_data = [today.year]
+                                selected_year = st.selectbox(
+                                    "Selecione o Ano:", years_with_data, key="dashboard_alarm_report_year_sem")
+
+                            with col2:
+                                selected_semester = st.selectbox(
+                                    "Selecione o Semestre:",
+                                    ["1º Semestre (Jan-Jun)",
+                                     "2º Semestre (Jul-Dez)"],
+                                    key="dashboard_alarm_report_semester"
+                                )
+
+                            if "1º" in selected_semester:
+                                semester_months = [1, 2, 3, 4, 5, 6]
+                                semester_num = 1
+                            else:
+                                semester_months = [7, 8, 9, 10, 11, 12]
+                                semester_num = 2
+
+                            inspections_selected = df_alarm_inspections[
+                                (df_alarm_inspections['data_inspecao_dt'].dt.year == selected_year) &
+                                (df_alarm_inspections['data_inspecao_dt'].dt.month.isin(
+                                    semester_months))
+                            ].sort_values(by='data_inspecao_dt')
+
+                            period_description = f"{semester_num}º Semestre de {selected_year}"
+                            period_type = "biannual"
+
+                    if inspections_selected.empty:
+                        st.info(
+                            f"Nenhuma inspeção foi registrada em {period_description}.")
+                    else:
+                        st.write(
+                            f"Encontradas {len(inspections_selected)} inspeções em {period_description}.")
+
+                        if st.button("📄 Gerar e Imprimir Relatório do Dashboard", type="primary", key="dashboard_generate_alarm_report"):
+                            unit_name = st.session_state.get(
+                                'current_unit_name', 'N/A')
+                            report_html = generate_alarm_inspection_html(
+                                inspections_selected,
+                                df_alarm_inventory,
+                                unit_name,
+                                period_type=period_type
+                            )
+
+                            js_code = f"""
+                                const reportHtml = {json.dumps(report_html)};
+                                const printWindow = window.open('', '_blank');
+                                if (printWindow) {{
+                                    printWindow.document.write(reportHtml);
+                                    printWindow.document.close();
+                                    printWindow.focus();
+                                    setTimeout(() => {{ 
+                                        printWindow.print(); 
+                                        printWindow.close(); 
+                                    }}, 500);
+                                }} else {{
+                                    alert('Por favor, desabilite o bloqueador de pop-ups para este site.');
+                                }}
+                            """
+
+                            streamlit_js_eval(
+                                js_expressions=js_code, key="dashboard_print_alarm_report_js")
+                            st.success("Relatório enviado para impressão!")
+
+                st.markdown("---")
+
+                dashboard_df = get_alarm_status_df(df_alarm_inspections)
+
+                if not df_alarm_inventory.empty:
+                    dashboard_df = pd.merge(
+                        dashboard_df,
+                        df_alarm_inventory[['id_sistema',
+                                            'localizacao', 'modelo', 'marca']],
+                        on='id_sistema',
+                        how='left'
+                    )
+
+                status_counts = dashboard_df['status_dashboard'].value_counts()
+                col1, col2, col3, col4 = st.columns(4)
+                col1.metric("✅ Total de Sistemas", len(dashboard_df))
+                col2.metric("🟢 OK", status_counts.get("🟢 OK", 0))
+                col3.metric("🟠 Com Pendências",
+                            status_counts.get("🟠 COM PENDÊNCIAS", 0))
+                col4.metric("🔴 Vencido", status_counts.get("🔴 VENCIDO", 0))
+                st.markdown("---")
+
+                st.subheader("Lista de Sistemas e Status")
+                for _, row in dashboard_df.iterrows():
+                    status = row['status_dashboard']
+                    prox_inspecao = pd.to_datetime(row['data_proxima_inspecao']).strftime(
+                        '%d/%m/%Y') if pd.notna(row['data_proxima_inspecao']) else "N/A"
+                    localizacao = row.get('localizacao', 'Local não definido')
+
+                    expander_title = f"{status} | **ID:** {row['id_sistema']} | **Local:** {localizacao} | **Próx. Inspeção:** {prox_inspecao}"
+
+                    with st.expander(expander_title):
+                        ultima_inspecao = pd.to_datetime(row['data_inspecao']).strftime(
+                            '%d/%m/%Y') if pd.notna(row['data_inspecao']) else "N/A"
+                        st.write(
+                            f"**Última inspeção:** {ultima_inspecao} por **{row['inspetor']}**")
+                        st.write(
+                            f"**Plano de Ação Sugerido:** {row.get('plano_de_acao', 'N/A')}")
+
+                        if status in ["🟠 COM PENDÊNCIAS", "🔴 VENCIDO"]:
+                            if st.button("✍️ Registrar Ação Corretiva", key=f"action_alarm_{row['id_sistema']}"):
+                                action_dialog_alarm(row.to_dict())
+
+                        st.markdown("---")
+                        st.write("**Detalhes da Última Inspeção:**")
+                        try:
+                            results_json = row.get('resultados_json')
+                            if results_json and pd.notna(results_json):
+                                results = json.loads(results_json)
+
+                                non_conformities = {
+                                    q: status for q, status in results.items() if status == "Não Conforme"}
+
+                                if non_conformities:
+                                    st.write(
+                                        "Itens não conformes encontrados:")
+                                    st.table(pd.DataFrame.from_dict(
+                                        non_conformities, orient='index', columns=['Status']))
+                                else:
+                                    st.success(
+                                        "Todos os itens estavam conformes na última inspeção.")
+                            else:
+                                st.info(
+                                    "Nenhum detalhe de inspeção disponível.")
+
+                            photo_link = row.get('link_foto_nao_conformidade')
+                            display_storage_image(
+                                photo_link, caption="Foto da Não Conformidade", width=300)
+
+                        except (json.JSONDecodeError, TypeError):
+                            st.error(
+                                "Não foi possível carregar os detalhes da inspeção (formato de dados inválido).")
+
+        except Exception as e:
+            st.error(f"Erro ao carregar os dados dos sistemas de alarme: {e}")
+            import traceback
+            st.error(f"Detalhes do erro: {traceback.format_exc()}")
+
+    with tab_canhoes:
+        st.header("Dashboard de Canhões Monitores")
+
+        df_inventory = load_sheet_data("inventario_canhoes_monitores")
+        df_inspections = load_sheet_data("inspecoes_canhoes_monitores")
+
+        if df_inspections.empty:
+            st.warning("Nenhuma inspeção de canhão monitor registrada.")
+        else:
+            dashboard_df = get_canhao_monitor_status_df(df_inspections)
+
+            if not df_inventory.empty:
+                dashboard_df = pd.merge(
+                    dashboard_df,
+                    df_inventory[['id_equipamento', 'localizacao', 'modelo']],
+                    on='id_equipamento',
+                    how='left'
+                )
+            else:
+                dashboard_df['localizacao'] = 'N/A'
+                dashboard_df['modelo'] = 'N/A'
+
+            status_counts = dashboard_df['status_dashboard'].value_counts()
+            col1, col2, col3, col4 = st.columns(4)
+            col1.metric("✅ Total de Canhões", len(dashboard_df))
+            col2.metric("🟢 OK", status_counts.get("🟢 OK", 0))
+            col3.metric("🟠 Com Pendências",
+                        status_counts.get("🟠 COM PENDÊNCIAS", 0))
+            col4.metric("🔴 Vencido", status_counts.get("🔴 VENCIDO", 0))
+            st.markdown("---")
+
+            st.subheader("Lista de Equipamentos e Status")
+            for _, row in dashboard_df.iterrows():
+                status = row['status_dashboard']
+                prox_inspecao = pd.to_datetime(row['data_proxima_inspecao']).strftime(
+                    '%d/%m/%Y') if pd.notna(row['data_proxima_inspecao']) else "N/A"
+                localizacao = row.get('localizacao', 'Local não definido')
+
+                expander_title = f"{status} | **ID:** {row['id_equipamento']} | **Local:** {localizacao} | **Próx. Inspeção:** {prox_inspecao}"
+
+                with st.expander(expander_title):
+                    ultima_inspecao = pd.to_datetime(row['data_inspecao']).strftime(
+                        '%d/%m/%Y') if pd.notna(row['data_inspecao']) else "N/A"
+                    st.write(
+                        f"**Última inspeção:** {ultima_inspecao} por **{row['inspetor']}** ({row['tipo_inspecao']})")
+                    st.write(
+                        f"**Plano de Ação Sugerido:** {row.get('plano_de_acao', 'N/A')}")
+
+                    if status in ["🟠 COM PENDÊNCIAS", "🔴 VENCIDO"]:
+                        if st.button("✍️ Registrar Ação Corretiva", key=f"action_canhao_{row['id_equipamento']}"):
+                            action_dialog_canhao_monitor(row.to_dict())
+
+                    st.markdown("---")
+                    st.write("**Detalhes da Última Inspeção:**")
+                    try:
+                        results_json = row.get('resultados_json')
+                        if results_json and pd.notna(results_json):
+                            results = json.loads(results_json)
+                            non_conformities = {q: s for q, s in results.items() if s in [
+                                "Não Conforme", "Reprovado"]}
+
+                            if non_conformities:
+                                st.write("Itens não conformes encontrados:")
+                                st.table(pd.DataFrame.from_dict(
+                                    non_conformities, orient='index', columns=['Status']))
+                            else:
+                                st.success(
+                                    "Todos os itens estavam conformes na última inspeção.")
+                        else:
+                            st.info("Nenhum detalhe de inspeção disponível.")
+
+                        photo_link = row.get('link_foto_nao_conformidade')
+                        display_storage_image(
+                            photo_link, caption="Foto da Não Conformidade", width=300)
+
+                    except (json.JSONDecodeError, TypeError):
+                        st.error(
+                            "Não foi possível carregar os detalhes da inspeção.")

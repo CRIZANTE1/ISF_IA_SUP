@@ -217,12 +217,17 @@ def generate_strong_uuid(user_email: str) -> int:
 def get_user_id() -> int:
     """
     Retorna o ID (INTEGER) do usuário logado.
-    Aceita qualquer ID existente (simples como 1, 2, 3 ou UUID forte como 308380173).
-    NÃO gera UUIDs automaticamente - apenas retorna o ID existente.
+    SUPERUSERS NÃO TÊM ID - retorna None para superusers.
+    Apenas usuários normais têm ID na tabela.
     
     Returns:
-        int: ID do usuário ou None se não encontrado
+        int: ID do usuário ou None se não encontrado/superuser
     """
+    # SUPERUSERS NÃO TÊM ID - retorna None imediatamente
+    if is_superuser():
+        logger.info("👑 Superuser não possui ID - usando None")
+        return None
+    
     # Verifica se já temos o user_id na sessão (evita loops)
     if 'current_user_id' in st.session_state and st.session_state['current_user_id']:
         try:
@@ -452,8 +457,13 @@ def setup_sidebar():
     # Obtém o user_id (não gera automaticamente)
     user_id = get_user_id()
     if not user_id:
-        st.sidebar.warning("⚠️ Usuário sem ID no sistema.")
-        logger.warning(f"Usuário {user_email} não possui ID - pode ser um usuário novo")
+        if is_superuser():
+            st.sidebar.info("👑 Superuser - acesso total ao sistema")
+            logger.info(f"👑 Superuser {user_email} - sem ID (normal para superusers)")
+        else:
+            st.sidebar.warning("⚠️ Usuário sem ID no sistema.")
+            logger.warning(f"Usuário {user_email} não possui ID - pode ser um usuário novo")
+        
         # Para usuários sem ID, ainda permite acesso (pode ser superuser ou novo usuário)
         st.session_state['current_user_id'] = None
         st.session_state['current_user_email'] = user_email
@@ -515,6 +525,9 @@ def setup_sidebar():
     
     st.sidebar.info(f"{plan_emoji} **Plano:** {plan_display}")
     
-    logger.info(f"✅ Sidebar configurado para {user_email} (ID: {user_id}) - {plan_display}")
+    if is_superuser():
+        logger.info(f"✅ Sidebar configurado para {user_email} (Superuser) - {plan_display}")
+    else:
+        logger.info(f"✅ Sidebar configurado para {user_email} (ID: {user_id}) - {plan_display}")
     
-    return True  # ✅ Ambiente carregado com sucesso essa versão conectava
+    return True  # ✅ Ambiente carregado com sucesso

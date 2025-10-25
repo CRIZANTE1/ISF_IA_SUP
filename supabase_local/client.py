@@ -394,6 +394,15 @@ class SupabaseClient:
 def get_supabase_client() -> SupabaseClient | None:
     """Retorna instância do cliente Supabase."""
     try:
+        # Diagnostica o estado atual antes de tentar inicializar
+        init_diagnosis = diagnose_supabase_initialization()
+        logger.info(f"🔍 Diagnóstico de inicialização: {init_diagnosis}")
+        
+        # Se há inicialização travada, força limpeza
+        if init_diagnosis.get('status') == 'stuck':
+            logger.warning("🔄 Inicialização travada detectada - forçando limpeza")
+            force_cleanup_supabase_state()
+        
         # Verifica se já existe na sessão para evitar recriação desnecessária
         if 'supabase_client' in st.session_state:
             return st.session_state['supabase_client']
@@ -499,7 +508,18 @@ def reset_supabase_client():
 def force_cleanup_supabase_state():
     """Força a limpeza do estado do Supabase quando travado."""
     logger.warning("🔄 Forçando limpeza do estado do Supabase...")
-    reset_supabase_client()
+    
+    # Limpa todas as flags de estado
+    state_keys = [
+        'supabase_client',
+        'supabase_client_initializing', 
+        'supabase_client_init_start_time',
+        'supabase_client_error'
+    ]
+    
+    for key in state_keys:
+        if key in st.session_state:
+            del st.session_state[key]
     
     # Aguarda um momento para garantir que o estado foi limpo
     import time
@@ -559,4 +579,67 @@ def diagnose_supabase_connection():
             "status": "error",
             "message": f"Erro no diagnóstico: {e}",
             "solution": "Verifique a configuração do Streamlit"
+        }
+
+
+def diagnose_supabase_initialization():
+    """Diagnostica especificamente problemas de inicialização travada."""
+    try:
+        # Verifica estado atual da sessão
+        state_info = {
+            "supabase_client_exists": 'supabase_client' in st.session_state,
+            "initializing": 'supabase_client_initializing' in st.session_state,
+            "error_flag": 'supabase_client_error' in st.session_state,
+            "init_start_time": st.session_state.get('supabase_client_init_start_time')
+        }
+        
+        # Se há inicialização em andamento, verifica se está travada
+        if state_info["initializing"]:
+            import time
+            current_time = time.time()
+            init_start = state_info["init_start_time"]
+            
+            if init_start:
+                elapsed = current_time - init_start
+                if elapsed > 30:
+                    return {
+                        "status": "stuck",
+                        "message": f"Inicialização travada há {elapsed:.1f}s",
+                        "solution": "Execute force_cleanup_supabase_state() para limpar",
+                        "elapsed_time": elapsed
+                    }
+                else:
+                    return {
+                        "status": "initializing",
+                        "message": f"Inicialização em andamento há {elapsed:.1f}s",
+                        "elapsed_time": elapsed
+                    }
+        
+        # Se há flag de erro
+        if state_info["error_flag"]:
+            return {
+                "status": "error",
+                "message": "Erro anterior na inicialização",
+                "solution": "Execute reset_supabase_client() para tentar novamente"
+            }
+        
+        # Se cliente existe
+        if state_info["supabase_client_exists"]:
+            return {
+                "status": "success",
+                "message": "Cliente Supabase já inicializado",
+                "client_type": type(st.session_state['supabase_client']).__name__
+            }
+        
+        return {
+            "status": "ready",
+            "message": "Pronto para inicialização",
+            "state_info": state_info
+        }
+        
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Erro no diagnóstico de inicialização: {e}",
+            "solution": "Verifique os logs para mais detalhes"
         }

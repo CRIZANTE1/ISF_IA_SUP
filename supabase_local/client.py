@@ -137,7 +137,7 @@ class SupabaseClient:
             logger.warning(f"Não foi possível obter user_id: {e}")
             return None
 
-    def get_data(self, table_name: str, filters: dict = None) -> pd.DataFrame:
+    def get_data(self, table_name: str, filters: dict | None = None) -> pd.DataFrame:
         """
         Busca dados de uma tabela com ISOLAMENTO AUTOMÁTICO por user_id.
         
@@ -172,6 +172,7 @@ class SupabaseClient:
                 # Tabelas normais - filtro por user_id
                 if not self.user_id:
                     logger.warning(f"Usuário não identificado. Retornando dados vazios para '{table_name}'.")
+                    # Não mostra warning para o usuário, apenas retorna dados vazios
                     return pd.DataFrame()
                 
                 # Verifica se é superuser - se for, não aplica filtro
@@ -188,12 +189,23 @@ class SupabaseClient:
             
             response = query.execute()
             
-            if hasattr(response, 'data') and response.data:
-                logger.info(f"✅ {len(response.data)} registros lidos de '{table_name}'")
-                return pd.DataFrame(response.data)
-            
-            logger.info(f"ℹ️ Nenhum registro encontrado em '{table_name}'")
-            return pd.DataFrame()
+            # Verifica se a resposta tem dados
+            try:
+                if hasattr(response, 'data'):
+                    data = getattr(response, 'data', None)
+                    if data:
+                        logger.info(f"✅ {len(data)} registros lidos de '{table_name}'")
+                        return pd.DataFrame(data)
+                    else:
+                        logger.info(f"ℹ️ Nenhum registro encontrado em '{table_name}'")
+                        return pd.DataFrame()
+                else:
+                    logger.warning(f"⚠️ Resposta inesperada do Supabase para '{table_name}'")
+                    return pd.DataFrame()
+            except (AttributeError, TypeError) as e:
+                # Se response não tem atributo data ou é de tipo inesperado
+                logger.warning(f"⚠️ Erro ao processar resposta do Supabase: {e}")
+                return pd.DataFrame()
             
         except Exception as e:
             logger.error(f"❌ Erro ao ler '{table_name}': {e}")
@@ -350,7 +362,7 @@ def get_supabase_client() -> SupabaseClient | None:
         raise
 
 
-def get_supabase_client_no_cache() -> SupabaseClient:
+def get_supabase_client_no_cache() -> SupabaseClient | None:
     """Versão sem cache para casos de emergência."""
     try:
         logger.info("🔄 Inicializando cliente Supabase (sem cache)...")

@@ -35,13 +35,6 @@ def is_superuser() -> bool:
     try:
         user_email = get_user_email()
         superuser_email = st.secrets.get("superuser", {}).get("admin_email", "").lower().strip()
-        
-        # Debug temporário
-        print(f"🔍 DEBUG is_superuser:")
-        print(f"  - user_email: {user_email}")
-        print(f"  - superuser_email: {superuser_email}")
-        print(f"  - Comparação: {user_email == superuser_email}")
-        
         return user_email is not None and user_email == superuser_email
     except (KeyError, AttributeError):
         return False
@@ -63,7 +56,9 @@ def get_user_display_name():
 def get_user_email() -> str | None:
     try:
         if hasattr(st.user, 'email') and st.user.email:
-            return st.user.email.lower().strip()
+            email = st.user.email
+            if isinstance(email, str):
+                return email.lower().strip()
         return None
     except Exception:
         return None
@@ -105,10 +100,7 @@ def get_user_info() -> dict | None:
     Retorna o registro do usuário. Se for o superusuário, "fabrica" o registro
     usando os dados dos segredos, incluindo o ambiente de testes.
     """
-    print(f"🔍 DEBUG get_user_info - is_superuser(): {is_superuser()}")
-    
     if is_superuser():
-        print("🔍 DEBUG - Usuário identificado como superuser")
         # "Fabrica" um registro de usuário mestre, agora incluindo o ambiente de testes dos segredos.
         return {
             'email': get_user_email(),
@@ -159,9 +151,12 @@ def is_uuid_unique(uuid_value: int) -> bool:
         from supabase_local import get_supabase_client
         db_client = get_supabase_client()
         
+        if db_client is None:
+            return True  # Se não conseguir conectar, assume que é único
+        
         # Busca se já existe um usuário com esse ID
         existing_users = db_client.get_data("usuarios")
-        if not existing_users.empty and 'id' in existing_users.columns:
+        if existing_users is not None and not existing_users.empty and 'id' in existing_users.columns:
             existing_ids = existing_users['id'].tolist()
             return uuid_value not in existing_ids
         
@@ -224,14 +219,14 @@ def generate_strong_uuid(user_email: str) -> int:
     logger.info(f"🔐 UUID forte gerado: {final_uuid} (compatível com PostgreSQL integer)")
     return final_uuid
 
-def get_user_id() -> int:
+def get_user_id() -> int | None:
     """
     Retorna o ID (INTEGER) do usuário logado.
     Aceita qualquer ID existente (simples como 1, 2, 3 ou UUID forte como 308380173).
     NÃO gera UUIDs automaticamente - apenas retorna o ID existente.
     
     Returns:
-        int: ID do usuário ou None se não encontrado
+        int | None: ID do usuário ou None se não encontrado
     """
     # Verifica se já temos o user_id na sessão (evita loops)
     if 'current_user_id' in st.session_state and st.session_state['current_user_id']:
@@ -287,6 +282,10 @@ def generate_uuid_for_new_user(user_email: str) -> int:
         from supabase_local import get_supabase_client
         db_client = get_supabase_client()
         
+        if db_client is None:
+            logger.warning("Cliente Supabase não disponível")
+            return new_uuid
+        
         # Atualiza o registro do usuário com o novo UUID
         update_data = {'id': new_uuid}
         db_client.update_data("usuarios", update_data, "email", user_email)
@@ -307,9 +306,13 @@ def save_access_request(user_name, user_email, justification):
         # PARA: Usa o cliente Supabase e um dicionário
         db_client = get_supabase_client()
 
+        if db_client is None:
+            st.error("Cliente de banco de dados não disponível")
+            return False
+
         # Verifica se já existe solicitação pendente
         df_requests = db_client.get_data("solicitacoes_acesso")
-        if not df_requests.empty:
+        if df_requests is not None and not df_requests.empty:
             if not df_requests[(df_requests['email_usuario'] == user_email) & (df_requests['status'] == 'Pendente')].empty:
                 st.warning(
                     "Você já possui uma solicitação de acesso pendente.")
@@ -372,8 +375,14 @@ def get_effective_user_status() -> str:
     trial_end_date = user_info.get('trial_end_date')
     if sheet_status != 'ativo':
         return sheet_status
-    if not pd.isna(trial_end_date) and isinstance(trial_end_date, date) and date.today() > trial_end_date:
-        return 'trial_expirado'
+    # Verifica se trial_end_date é uma data válida e se já expirou
+    if trial_end_date is not None:
+        try:
+            if isinstance(trial_end_date, date) and date.today() > trial_end_date:
+                return 'trial_expirado'
+        except (TypeError, ValueError):
+            # Se houver erro na comparação, ignora
+            pass
     return sheet_status
 
 
@@ -382,9 +391,17 @@ def is_on_trial() -> bool:
     if not user_info:
         return False
     trial_end_date = user_info.get('trial_end_date')
-    if pd.isna(trial_end_date):
+    if trial_end_date is None:
         return False
-    return date.today() <= trial_end_date
+    try:
+        if pd.isna(trial_end_date):
+            return False
+    except (TypeError, ValueError):
+        # Se pd.isna falhar, assume que não é NaN
+        pass
+    if isinstance(trial_end_date, date):
+        return date.today() <= trial_end_date
+    return False
 
 
 def get_effective_user_plan() -> str:

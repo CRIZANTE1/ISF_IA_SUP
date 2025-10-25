@@ -15,9 +15,16 @@ GEMINI_MODEL = 'gemini-1.5-pro-latest'
 class PDFQA:
     def __init__(self):
         # Carrega a primeira chave de API na inicialização
-        load_api()
-        self.model = genai.GenerativeModel(GEMINI_MODEL)
-        self.key_manager = get_api_key_manager()
+        try:
+            load_api()
+            self.model = genai.GenerativeModel(GEMINI_MODEL)
+            self.key_manager = get_api_key_manager()
+            self.api_available = True
+        except Exception as e:
+            logger.warning(f"API do Gemini não disponível: {e}")
+            self.model = None
+            self.key_manager = None
+            self.api_available = False
 
     def ask_gemini(self, pdf_files, question):
         """Faz pergunta ao Gemini com retry, rotação de chaves e گزارش de falha corretos."""

@@ -57,12 +57,17 @@ class APIKeyManager:
                 logger.error(f"Nenhuma chave API encontrada: {e}")
 
         if not keys:
-            raise ValueError("❌ Nenhuma chave API do Gemini configurada!")
+            logger.warning("⚠️ Nenhuma chave API do Gemini configurada - funcionalidades de IA desabilitadas")
+            return []
 
         return keys
 
     def get_next_key(self) -> str:
         """Obtém a próxima chave disponível baseada na estratégia"""
+        
+        # Se não há chaves configuradas, retorna None
+        if not self.keys:
+            return None
 
         # Remove chaves em cooldown que já expiraram
         current_time = datetime.now()

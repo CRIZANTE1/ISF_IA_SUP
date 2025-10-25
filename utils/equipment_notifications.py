@@ -242,8 +242,8 @@ class EquipmentNotificationSystem:
 
             # Verifica extintores
             try:
-                response = db_client.table("extintores").select("*").execute()
-                df_ext = pd.DataFrame(response.data)
+                # Usa get_data para aplicar filtros de segurança
+                df_ext = db_client.get_data("extintores")
                 if not df_ext.empty:
                     date_columns = [
                         'data_proxima_inspecao', 'data_proxima_manutencao_2_nivel', 'data_proxima_manutencao_3_nivel']
@@ -273,8 +273,8 @@ class EquipmentNotificationSystem:
 
             # Verifica mangueiras
             try:
-                response = db_client.table("mangueiras").select("*").execute()
-                df_hose = pd.DataFrame(response.data)
+                # Usa get_data para aplicar filtros de segurança
+                df_hose = db_client.get_data("mangueiras")
                 if not df_hose.empty:
                     if 'data_proximo_teste' in df_hose.columns:
                         df_hose['data_proximo_teste'] = pd.to_datetime(
@@ -301,8 +301,8 @@ class EquipmentNotificationSystem:
 
             # Verifica SCBAs
             try:
-                response = db_client.table("conjuntos_autonomos").select("*").execute()
-                df_scba = pd.DataFrame(response.data)
+                # Usa get_data para aplicar filtros de segurança
+                df_scba = db_client.get_data("conjuntos_autonomos")
                 if not df_scba.empty:
                     if 'data_validade' in df_scba.columns:
                         df_scba['data_validade'] = pd.to_datetime(
@@ -329,12 +329,12 @@ class EquipmentNotificationSystem:
 
             # Verifica detectores multigás
             try:
-                response = db_client.table("inventario_multigas").select("*").execute()
-                df_multi = pd.DataFrame(response.data)
+                # Usa get_data para aplicar filtros de segurança
+                df_multi = db_client.get_data("inventario_multigas")
                 if not df_multi.empty:
                     try:
-                        response_insp = db_client.table("inspecoes_multigas").select("*").execute()
-                        df_insp = pd.DataFrame(response_insp.data)
+                        # Usa get_data para aplicar filtros de segurança
+                        df_insp = db_client.get_data("inspecoes_multigas")
                         if not df_insp.empty:
                             if 'proxima_calibracao' in df_insp.columns:
                                 df_insp['proxima_calibracao'] = pd.to_datetime(
@@ -386,8 +386,8 @@ class EquipmentNotificationSystem:
 
             # Verifica extintores reprovados sem ações corretivas
             try:
-                response = db_client.table("extintores").select("*").execute()
-                df_ext = pd.DataFrame(response.data)
+                # Usa get_data para aplicar filtros de segurança
+                df_ext = db_client.get_data("extintores")
                 if not df_ext.empty:
                     if 'aprovado_inspecao' in df_ext.columns:
                         failed_extinguishers = df_ext[
@@ -413,8 +413,8 @@ class EquipmentNotificationSystem:
 
             # Verifica mangueiras reprovadas/condenadas
             try:
-                response = db_client.table("mangueiras").select("*").execute()
-                df_hose = pd.DataFrame(response.data)
+                # Usa get_data para aplicar filtros de segurança
+                df_hose = db_client.get_data("mangueiras")
                 if not df_hose.empty:
                     if 'resultado' in df_hose.columns:
                         failed_hoses = df_hose[

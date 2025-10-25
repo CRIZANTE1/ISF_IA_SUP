@@ -102,7 +102,15 @@ class SupabaseClient:
             st.stop()
             raise
 
-    def _get_current_user_id(self) -> int:
+    def _is_superuser(self) -> bool:
+        """Verifica se o usuário atual é superuser."""
+        try:
+            from auth.auth_utils import is_superuser
+            return is_superuser()
+        except Exception:
+            return False
+
+    def _get_current_user_id(self) -> int | None:
         """Obtém o user_id (INTEGER) do usuário logado da sessão."""
         try:
             # Evita dependência circular - obtém user_id diretamente da sessão
@@ -153,14 +161,25 @@ class SupabaseClient:
             query = self.client.table(table_name).select("*")
             
             # 🔒 APLICA FILTRO DE SEGURANÇA (multi-tenant) usando user_id
-            if table_name not in GLOBAL_TABLES:
+            if table_name in GLOBAL_TABLES:
+                # Tabelas globais - apenas superuser pode acessar
+                if not self._is_superuser():
+                    logger.warning(f"❌ Acesso negado: apenas superuser pode acessar tabela global '{table_name}'")
+                    return pd.DataFrame()
+                else:
+                    logger.info(f"👑 Superuser acessando tabela global '{table_name}'")
+            else:
+                # Tabelas normais - filtro por user_id
                 if not self.user_id:
                     logger.warning(f"Usuário não identificado. Retornando dados vazios para '{table_name}'.")
-                    # Não mostra warning para o usuário, apenas retorna dados vazios
                     return pd.DataFrame()
                 
-                query = query.eq('user_id', self.user_id)
-                logger.info(f"🔒 Filtro de segurança aplicado: user_id={self.user_id}")
+                # Verifica se é superuser - se for, não aplica filtro
+                if self._is_superuser():
+                    logger.info(f"👑 Superuser acessando todos os dados de '{table_name}'")
+                else:
+                    query = query.eq('user_id', self.user_id)
+                    logger.info(f"🔒 Filtro de segurança aplicado: user_id={self.user_id}")
             
             # Aplica filtros adicionais se fornecidos
             if filters:
@@ -169,7 +188,7 @@ class SupabaseClient:
             
             response = query.execute()
             
-            if response.data:
+            if hasattr(response, 'data') and response.data:
                 logger.info(f"✅ {len(response.data)} registros lidos de '{table_name}'")
                 return pd.DataFrame(response.data)
             
@@ -181,7 +200,7 @@ class SupabaseClient:
             st.error(f"Erro ao carregar dados de '{table_name}': {e}")
             return pd.DataFrame()
 
-    def append_data(self, table_name: str, data: dict or list[dict]):
+    def append_data(self, table_name: str, data: dict | list[dict]):
         """
         Adiciona registros com INJEÇÃO AUTOMÁTICA do user_id.
         
@@ -205,18 +224,29 @@ class SupabaseClient:
                 "solicitacoes_suporte"
             }
             
-            # 🔒 INJETA user_id automaticamente
-            if table_name not in GLOBAL_TABLES:
+            # 🔒 CONTROLE DE ACESSO E INJEÇÃO DE user_id
+            if table_name in GLOBAL_TABLES:
+                # Tabelas globais - apenas superuser pode acessar
+                if not self._is_superuser():
+                    raise ValueError(f"❌ Acesso negado: apenas superuser pode acessar tabela global '{table_name}'")
+                else:
+                    logger.info(f"👑 Superuser salvando em tabela global '{table_name}'")
+            else:
+                # Tabelas normais - injeta user_id
                 if not self.user_id:
                     raise ValueError("❌ Usuário não identificado. Impossível salvar dados.")
                 
-                if isinstance(data, list):
-                    for record in data:
-                        record['user_id'] = self.user_id
+                # Se não for superuser, injeta user_id
+                if not self._is_superuser():
+                    if isinstance(data, list):
+                        for record in data:
+                            record['user_id'] = self.user_id
+                    else:
+                        data['user_id'] = self.user_id
+                    
+                    logger.info(f"🔒 user_id {self.user_id} injetado nos registros")
                 else:
-                    data['user_id'] = self.user_id
-                
-                logger.info(f"🔒 user_id {self.user_id} injetado nos registros")
+                    logger.info(f"👑 Superuser salvando dados sem filtro de user_id")
             
             response = self.client.table(table_name).insert(data).execute()
             
@@ -240,10 +270,23 @@ class SupabaseClient:
             
             query = self.client.table(table_name).update(data)
             
-            if table_name not in GLOBAL_TABLES:
+            if table_name in GLOBAL_TABLES:
+                # Tabelas globais - apenas superuser pode acessar
+                if not self._is_superuser():
+                    raise ValueError(f"❌ Acesso negado: apenas superuser pode acessar tabela global '{table_name}'")
+                else:
+                    logger.info(f"👑 Superuser atualizando tabela global '{table_name}'")
+            else:
+                # Tabelas normais - filtro por user_id
                 if not self.user_id:
                     raise ValueError("❌ Usuário não identificado.")
-                query = query.eq('user_id', self.user_id)
+                
+                # Se não for superuser, aplica filtro de user_id
+                if not self._is_superuser():
+                    query = query.eq('user_id', self.user_id)
+                    logger.info(f"🔒 Filtro de user_id aplicado na atualização")
+                else:
+                    logger.info(f"👑 Superuser atualizando dados sem filtro de user_id")
             
             response = query.eq(filter_column, filter_value).execute()
             logger.info(f"✅ Registro atualizado em '{table_name}'")
@@ -264,10 +307,23 @@ class SupabaseClient:
             
             query = self.client.table(table_name).delete()
             
-            if table_name not in GLOBAL_TABLES:
+            if table_name in GLOBAL_TABLES:
+                # Tabelas globais - apenas superuser pode acessar
+                if not self._is_superuser():
+                    raise ValueError(f"❌ Acesso negado: apenas superuser pode acessar tabela global '{table_name}'")
+                else:
+                    logger.info(f"👑 Superuser excluindo de tabela global '{table_name}'")
+            else:
+                # Tabelas normais - filtro por user_id
                 if not self.user_id:
                     raise ValueError("❌ Usuário não identificado.")
-                query = query.eq('user_id', self.user_id)
+                
+                # Se não for superuser, aplica filtro de user_id
+                if not self._is_superuser():
+                    query = query.eq('user_id', self.user_id)
+                    logger.info(f"🔒 Filtro de user_id aplicado na exclusão")
+                else:
+                    logger.info(f"👑 Superuser excluindo dados sem filtro de user_id")
             
             response = query.eq(filter_column, filter_value).execute()
             logger.info(f"✅ Registro deletado de '{table_name}'")
@@ -280,7 +336,7 @@ class SupabaseClient:
 
 
 @st.cache_resource
-def get_supabase_client() -> SupabaseClient:
+def get_supabase_client() -> SupabaseClient | None:
     """Retorna instância única (singleton) do cliente Supabase."""
     try:
         logger.info("🔄 Inicializando cliente Supabase...")

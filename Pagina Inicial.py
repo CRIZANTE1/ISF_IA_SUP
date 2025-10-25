@@ -7,7 +7,6 @@ from auth.auth_utils import (
     is_admin, is_superuser, get_user_info
 )
 import streamlit as st
-from streamlit_option_menu import option_menu
 from PIL import Image
 import sys
 import os
@@ -17,7 +16,6 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 if current_dir not in sys.path:
     sys.path.insert(0, current_dir)
 
-
 from views import administracao, dashboard, resumo_gerencial, inspecao_extintores, \
                   inspecao_mangueiras, inspecao_scba, inspecao_chuveiros, \
                   inspecao_camaras_espuma, inspecao_multigas, historico, inspecao_alarmes, \
@@ -26,29 +24,67 @@ from views import is_perfil_available
 
 set_page_config()
 
-# Páginas base (sempre disponíveis)
-PAGES = {
-    "Dashboard": dashboard.show_page,
-    "Resumo Gerencial": resumo_gerencial.show_page,
-    "Inspeção de Extintores": inspecao_extintores.show_page,
-    "Inspeção de Mangueiras": inspecao_mangueiras.show_page,
-    "Inspeção de SCBA": inspecao_scba.show_page,
-    "Inspeção de Chuveiros/LO": inspecao_chuveiros.show_page,
-    "Inspeção de Câmaras de Espuma": inspecao_camaras_espuma.show_page,
-    "Inspeção Multigás": inspecao_multigas.show_page,
-    "Inspeção de Alarmes": inspecao_alarmes.show_page,
-    "Inspeção de Canhões Monitores": inspecao_canhoes_monitores.show_page,
-    "Histórico e Logs": historico.show_page,
-    "Utilitários": utilitarios.show_page,
-    "Super Admin": administracao.show_page,
-}
-
 # Adiciona perfil apenas se disponível
 PERFIL_DISPONIVEL = is_perfil_available()
 if PERFIL_DISPONIVEL:
     from views import perfil_usuario
-    PAGES["Meu Perfil"] = perfil_usuario.show_page
 
+
+def get_navigation_pages():
+    """Cria a estrutura de navegação baseada nas permissões do usuário"""
+    user_role = get_user_role()
+    user_plan = get_effective_user_plan()
+    
+    # Páginas base
+    pages = {}
+    
+    # Grupo: Dashboard e Relatórios
+    dashboard_pages = []
+    if user_plan in ['pro', 'premium_ia'] and user_role != 'viewer':
+        dashboard_pages.append(st.Page("pages/01_Dashboard.py", title="Dashboard"))
+    dashboard_pages.append(st.Page("pages/02_Resumo_Gerencial.py", title="Resumo Gerencial"))
+    
+    if dashboard_pages:
+        pages["📊 Dashboard e Relatórios"] = dashboard_pages
+    
+    # Grupo: Inspeções
+    inspection_pages = []
+    if user_plan in ['pro', 'premium_ia'] and user_role != 'viewer':
+        inspection_pages.extend([
+            st.Page("pages/03_Extintores.py", title="Extintores"),
+            st.Page("pages/04_Mangueiras.py", title="Mangueiras"),
+            st.Page("pages/05_SCBA.py", title="SCBA"),
+            st.Page("pages/06_Chuveiros_LO.py", title="Chuveiros/LO"),
+            st.Page("pages/07_Camaras_Espuma.py", title="Câmaras de Espuma"),
+            st.Page("pages/08_Multigas.py", title="Multigás"),
+            st.Page("pages/09_Alarmes.py", title="Alarmes"),
+            st.Page("pages/10_Canhoes_Monitores.py", title="Canhões Monitores")
+        ])
+    
+    if inspection_pages:
+        pages["🔍 Inspeções"] = inspection_pages
+    
+    # Grupo: Histórico e Utilitários
+    utility_pages = []
+    if user_plan in ['pro', 'premium_ia']:
+        utility_pages.append(st.Page("pages/11_Historico_Logs.py", title="Histórico e Logs"))
+    if user_plan in ['pro', 'premium_ia'] and user_role != 'viewer':
+        utility_pages.append(st.Page("pages/12_Utilitarios.py", title="Utilitários"))
+    
+    if utility_pages:
+        pages["⚙️ Histórico e Utilitários"] = utility_pages
+    
+    # Grupo: Perfil e Administração
+    admin_pages = []
+    if PERFIL_DISPONIVEL:
+        admin_pages.append(st.Page("pages/13_Meu_Perfil.py", title="Meu Perfil"))
+    if is_admin():
+        admin_pages.append(st.Page("pages/14_Super_Admin.py", title="Super Admin"))
+    
+    if admin_pages:
+        pages["👤 Perfil e Administração"] = admin_pages
+    
+    return pages
 
 def main():
     """Função principal do aplicativo"""
@@ -136,7 +172,7 @@ def main():
         # Configura sidebar e verifica se o ambiente foi carregado
         is_user_environment_loaded = setup_sidebar()
 
-        # Configura navegação lateral
+        # Configura sidebar com logo e logout
         with st.sidebar:
             # === LOGO NO TOPO DA SIDEBAR ===
             try:
@@ -160,104 +196,23 @@ def main():
                 st.caption(f"Erro ao carregar logo: {e}")
 
             st.markdown("---")
-
-            # Obtém informações do usuário
-            user_role = get_user_role()
-            user_plan = get_effective_user_plan()
-            page_options = []
-
-            # Define opções de página baseadas no plano e role
-            if user_plan == 'basico':
-                page_options.extend(["Resumo Gerencial"])
-            elif user_plan in ['pro', 'premium_ia']:
-                if user_role == 'viewer':
-                    page_options.extend(
-                        ["Resumo Gerencial", "Histórico e Logs"])
-                else:
-                    page_options.extend([
-                        "Dashboard", "Histórico e Logs", "Inspeção de Extintores", "Inspeção de Mangueiras",
-                        "Inspeção de SCBA", "Inspeção de Chuveiros/LO", "Inspeção de Câmaras de Espuma",
-                        "Inspeção Multigás", "Inspeção de Alarmes", "Inspeção de Canhões Monitores", "Utilitários"
-                    ])
-
-            # Adiciona "Meu Perfil" apenas se o módulo estiver disponível
-            if PERFIL_DISPONIVEL and "Meu Perfil" not in page_options:
-                page_options.append("Meu Perfil")
-
-            # Adiciona "Super Admin" para administradores
-            if is_admin() and "Super Admin" not in page_options:
-                page_options.append("Super Admin")
-
-            # Mapeia ícones para cada página
-            icon_map = {
-                "Dashboard": "speedometer2",
-                "Resumo Gerencial": "clipboard-data",
-                "Histórico e Logs": "clock-history",
-                "Inspeção de Extintores": "fire",
-                "Inspeção de Mangueiras": "droplet",
-                "Inspeção de SCBA": "lungs",
-                "Inspeção de Chuveiros/LO": "droplet-half",
-                "Inspeção de Câmaras de Espuma": "cloud-rain-heavy",
-                "Inspeção Multigás": "wind",
-                "Inspeção de Alarmes": "bell",
-                "Inspeção de Canhões Monitores": "water",
-                "Utilitários": "tools",
-                "Super Admin": "person-badge",
-                "Meu Perfil": "person-circle"
-            }
-
-            # Gera lista de ícones correspondentes
-            icons = [icon_map.get(page, "question-circle")
-                     for page in page_options]
-
-            # Menu de navegação
-            selected_page = option_menu(
-                menu_title="Navegação",
-                options=page_options,
-                icons=icons,
-                menu_icon="compass-fill",
-                default_index=0,
-                styles={
-                    "container": {"padding": "0 !important", "background-color": "transparent"},
-                    "icon": {"color": "inherit", "font-size": "15px"},
-                    "nav-link": {"font-size": "12px", "text-align": "left", "margin": "0px", "--hover-color": "#262730"},
-                    "nav-link-selected": {"background-color": st.get_option("theme.primaryColor")},
-                }
-            )
-
-            st.markdown("---")
             show_logout_button()
 
-        # Lógica de renderização de páginas
-        try:
-            if selected_page in PAGES:
-                # Se a página selecionada é válida, renderiza
-                if selected_page == "Meu Perfil" and not PERFIL_DISPONIVEL:
-                    st.error("O módulo 'Meu Perfil' não está disponível.")
-                elif is_user_environment_loaded or (is_admin() and selected_page == "Super Admin"):
-                    PAGES[selected_page]()
-                else:
-                     if is_admin():
-                        st.info("👈 Como Administrador, selecione uma opção no menu ou acesse o painel de Super Admin.")
-                     else:
-                        st.warning("👈 Seu ambiente de dados não pôde ser carregado. Verifique o status da sua conta ou contate o administrador.")
-            else:
-                # Fallback se a página selecionada não for encontrada (raro)
-                st.error(f"Página '{selected_page}' não encontrada.")
-                st.info("Redirecionando para a página inicial do seu perfil...")
-                # Tenta redirecionar para uma página padrão segura
-                if "Dashboard" in page_options:
-                    PAGES["Dashboard"]()
-                elif "Resumo Gerencial" in page_options:
-                    PAGES["Resumo Gerencial"]()
-                elif page_options:
-                    PAGES[page_options[0]]()
-                else:
-                    st.error("Nenhuma página disponível para seu perfil.")
+        # Verifica se o ambiente foi carregado
+        if not is_user_environment_loaded and not is_admin():
+            st.warning("👈 Seu ambiente de dados não pôde ser carregado. Verifique o status da sua conta ou contate o administrador.")
+            st.stop()
 
-        except Exception as e:
-            st.error(f"Erro ao carregar a página '{selected_page}': {e}")
-            st.error("Tente recarregar a página ou entre em contato com o suporte.")
+        # Cria e executa a navegação
+        pages = get_navigation_pages()
+        
+        if not pages:
+            st.error("Nenhuma página disponível para seu perfil.")
+            st.stop()
+        
+        # Executa a navegação
+        pg = st.navigation(pages, position="top")
+        pg.run()
 
     except Exception as e:
         st.error(f"Erro crítico na aplicação: {e}")

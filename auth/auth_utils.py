@@ -138,6 +138,15 @@ def get_user_info() -> dict | None:
         logger.warning("Email do usuário não encontrado")
         return None
     
+    # Verifica se as credenciais do Supabase estão configuradas
+    try:
+        credentials_check = check_supabase_credentials()
+        if credentials_check.get('status') == 'error':
+            logger.warning(f"⚠️ Problema com credenciais do Supabase: {credentials_check.get('message')}")
+            logger.warning(f"💡 Solução: {credentials_check.get('solution')}")
+    except Exception as e:
+        logger.warning(f"⚠️ Erro ao verificar credenciais: {e}")
+    
     logger.info(f"🔍 Buscando usuário: {user_email}")
     users_df = get_users_data()
     
@@ -187,6 +196,32 @@ def get_user_info() -> dict | None:
                     return user_data
         except Exception as e:
             logger.warning(f"⚠️ Erro na busca sem cache: {e}")
+        
+        # Diagnostica problema de conexão com Supabase
+        try:
+            from supabase_local import diagnose_supabase_connection, force_cleanup_supabase_state
+            diagnosis = diagnose_supabase_connection()
+            logger.warning(f"🔍 Diagnóstico do Supabase: {diagnosis}")
+            
+            # Se há problema de conexão, tenta limpar o estado e reconectar
+            if diagnosis.get('status') == 'error':
+                logger.warning("🔄 Tentando limpar estado do Supabase e reconectar...")
+                force_cleanup_supabase_state()
+                
+                # Tenta uma nova busca após limpeza
+                try:
+                    users_df_retry = get_users_data_no_cache()
+                    if not users_df_retry.empty:
+                        user_entry_retry = users_df_retry[users_df_retry['email'] == user_email]
+                        if not user_entry_retry.empty:
+                            logger.info(f"✅ Superuser {user_email} encontrado após limpeza do estado")
+                            user_data = user_entry_retry.iloc[0].to_dict()
+                            return user_data
+                except Exception as retry_error:
+                    logger.warning(f"⚠️ Erro na tentativa de reconexão: {retry_error}")
+                    
+        except Exception as diag_error:
+            logger.warning(f"⚠️ Erro no diagnóstico: {diag_error}")
         
         # IMPORTANTE: NÃO cria registro na tabela se o usuário já existir
         # Apenas retorna registro fabricado para uso da sessão atual
@@ -422,6 +457,48 @@ def generate_uuid_for_new_user(user_email: str) -> int:
     except Exception as e:
         logger.error(f"❌ Erro ao salvar UUID para novo usuário: {e}")
         return new_uuid
+
+def check_supabase_credentials():
+    """Verifica se as credenciais do Supabase estão configuradas corretamente."""
+    try:
+        if "supabase" not in st.secrets:
+            return {
+                "status": "error",
+                "message": "Configuração do Supabase não encontrada em st.secrets",
+                "solution": "Configure as credenciais do Supabase no Streamlit Cloud"
+            }
+        
+        url = st.secrets["supabase"].get("url")
+        key = st.secrets["supabase"].get("key")
+        
+        if not url or not key:
+            return {
+                "status": "error",
+                "message": "Credenciais do Supabase incompletas",
+                "solution": "Verifique se url e key estão configurados corretamente"
+            }
+        
+        if not url.startswith("https://"):
+            return {
+                "status": "error",
+                "message": "URL do Supabase inválida",
+                "solution": "A URL deve começar com https://"
+            }
+        
+        return {
+            "status": "success",
+            "message": "Credenciais do Supabase configuradas corretamente",
+            "url": url,
+            "key_length": len(key)
+        }
+        
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Erro ao verificar credenciais: {e}",
+            "solution": "Verifique a configuração do Streamlit"
+        }
+
 
 def save_access_request(user_name, user_email, justification):
     """Salva uma solicitação de acesso na tabela 'solicitacoes_acesso' do Supabase."""

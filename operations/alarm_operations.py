@@ -2,7 +2,7 @@ import streamlit as st
 import json
 import numpy as np
 import pandas as pd
-from supabase.client import get_supabase_client
+from supabase_local import get_supabase_client
 from datetime import date, timedelta
 from storage.client import upload_evidence_photo
 from utils.auditoria import log_action

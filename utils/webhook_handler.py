@@ -8,7 +8,7 @@ from typing import Dict, Any, Optional
 import sys
 import os
 
-from supabase.client import get_supabase_client
+from supabase_local import get_supabase_client
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 # Configurar logging

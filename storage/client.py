@@ -1,7 +1,7 @@
 # storage/client.py (VERSÃO COMPLETA E DEFINITIVA)
 
 import streamlit as st
-from supabase.client import get_supabase_client
+from supabase_local import get_supabase_client
 from datetime import datetime
 import logging
 from PIL import Image

@@ -4,7 +4,7 @@ import json
 from datetime import datetime, timedelta
 
 # Importe o cliente Supabase refatorado
-from supabase.client import get_supabase_client
+from supabase_local import get_supabase_client
 
 logger = logging.getLogger(__name__)
 

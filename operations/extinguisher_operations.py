@@ -8,7 +8,7 @@ from dateutil.relativedelta import relativedelta
 # DE: from gdrive.gdrive_upload import GoogleDriveUploader
 # DE: from gdrive.config import EXTINGUISHER_SHEET_NAME, LOCATIONS_SHEET_NAME, AUDIT_LOG_SHEET_NAME
 # PARA:
-from supabase.client import get_supabase_client
+from supabase_local import get_supabase_client
 
 from AI.api_Operation import PDFQA
 from utils.prompts import get_extinguisher_inspection_prompt
@@ -191,7 +191,7 @@ def save_inspection(record: dict) -> bool:
         True se salvou com sucesso, False caso contrário
     """
     try:
-        from supabase.client import get_supabase_client
+        from supabase_local import get_supabase_client
         from config.table_names import EXTINGUISHER_SHEET_NAME
         
         db_client = get_supabase_client()

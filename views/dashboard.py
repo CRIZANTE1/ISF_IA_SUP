@@ -41,7 +41,7 @@ import json
 from streamlit_js_eval import streamlit_js_eval
 from storage import display_storage_image
 from reports.alarm_report import generate_alarm_inspection_html
-from supabase.client import get_supabase_client
+from supabase_local import get_supabase_client
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 

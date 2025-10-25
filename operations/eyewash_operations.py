@@ -1,6 +1,6 @@
 import streamlit as st
 import json
-from supabase.client import get_supabase_client
+from supabase_local import get_supabase_client
 from datetime import date
 from dateutil.relativedelta import relativedelta
 from storage.client import upload_evidence_photo

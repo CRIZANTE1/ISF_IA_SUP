@@ -11,7 +11,7 @@ import logging
 # PARA: Importações refatoradas
 # Usamos a função genérica que agora usa Supabase
 from operations.history import load_sheet_data
-from supabase.client import get_supabase_client
+from supabase_local import get_supabase_client
 from utils.github_notifications import notify_new_access_request
 
 logger = logging.getLogger(__name__)

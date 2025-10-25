@@ -2,7 +2,7 @@ import pandas as pd
 from datetime import date
 import io
 from weasyprint import HTML
-from supabase.client import get_supabase_client
+from supabase_local import get_supabase_client
 
 
 def log_shipment(df_selected_items, item_type, bulletin_number):

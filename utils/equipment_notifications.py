@@ -4,7 +4,7 @@ Monitora vencimentos e pendências, enviando alertas automáticos para usuários
 """
 
 from supabase import create_client as supabase_create_client, Client as SupabaseClient
-from supabase.client import get_supabase_client
+from supabase_local import get_supabase_client
 import os
 import pandas as pd
 import logging

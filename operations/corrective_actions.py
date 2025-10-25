@@ -1,7 +1,7 @@
 import streamlit as st
 from datetime import date
 from .extinguisher_operations import save_inspection, calculate_next_dates, generate_action_plan
-from supabase.client import get_supabase_client
+from supabase_local import get_supabase_client
 from utils.auditoria import log_action
 
 

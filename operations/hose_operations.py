@@ -1,7 +1,7 @@
 import streamlit as st
 from datetime import date
 from dateutil.relativedelta import relativedelta
-from supabase.client import get_supabase_client
+from supabase_local import get_supabase_client
 from utils.auditoria import log_action
 from auth.auth_utils import get_user_display_name
 

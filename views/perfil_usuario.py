@@ -4,7 +4,7 @@ from utils.webhook_handler import (
 )
 from config.page_config import set_page_config
 from utils.auditoria import log_action
-from supabase.client import get_supabase_client
+from supabase_local import get_supabase_client
 from auth.auth_utils import (
     get_user_display_name, get_user_email, get_user_info,
     get_effective_user_plan, get_effective_user_status, is_on_trial

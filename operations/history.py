@@ -1,4 +1,4 @@
-from supabase.client import get_supabase_client
+from supabase_local import get_supabase_client
 import pandas as pd
 import streamlit as st
 

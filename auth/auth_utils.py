@@ -97,13 +97,29 @@ def get_users_data():
 
 def get_user_info() -> dict | None:
     """
-    Retorna o registro do usuário. Se for o superusuário, "fabrica" o registro
-    usando os dados dos segredos, incluindo o ambiente de testes.
+    Retorna o registro do usuário. Se for o superusuário, primeiro tenta buscar na tabela,
+    se não encontrar, "fabrica" o registro usando os dados dos segredos.
     """
+    user_email = get_user_email()
+    if not user_email:
+        logger.warning("Email do usuário não encontrado")
+        return None
+    
+    logger.info(f"🔍 Buscando usuário: {user_email}")
+    users_df = get_users_data()
+    
+    if not users_df.empty:
+        user_entry = users_df[users_df['email'] == user_email]
+        
+        if not user_entry.empty:
+            logger.info(f"✅ Usuário encontrado na tabela: {user_email}")
+            return user_entry.iloc[0].to_dict()
+    
+    # Se não encontrou na tabela e é superuser, fabrica o registro
     if is_superuser():
-        # "Fabrica" um registro de usuário mestre, agora incluindo o ambiente de testes dos segredos.
+        logger.info("👑 Superuser não encontrado na tabela - fabricando registro")
         return {
-            'email': get_user_email(),
+            'email': user_email,
             'nome': 'Desenvolvedor (Mestre)',
             'role': 'admin',
             'plano': 'premium_ia',
@@ -113,28 +129,10 @@ def get_user_info() -> dict | None:
             'data_cadastro': date.today().isoformat(),
             'trial_end_date': None
         }
-
-    # Se não for o superusuário, executa a lógica normal.
-    user_email = get_user_email()
-    if not user_email:
-        logger.warning("Email do usuário não encontrado")
-        return None
     
-    logger.info(f"🔍 Buscando usuário: {user_email}")
-    users_df = get_users_data()
-    
-    if users_df.empty:
-        logger.warning("❌ Tabela de usuários está vazia")
-        return None
-    
-    user_entry = users_df[users_df['email'] == user_email]
-    
-    if user_entry.empty:
-        logger.warning(f"❌ Usuário {user_email} não encontrado na tabela")
-        return None
-    
-    logger.info(f"✅ Usuário encontrado: {user_email}")
-    return user_entry.iloc[0].to_dict()
+    # Se não é superuser e não encontrou na tabela
+    logger.warning(f"❌ Usuário {user_email} não encontrado na tabela")
+    return None
 
 
 def is_uuid_unique(uuid_value: int) -> bool:

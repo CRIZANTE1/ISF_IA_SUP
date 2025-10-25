@@ -19,6 +19,11 @@ def save_new_multigas_detector(detector_id, brand, model, serial_number, cylinde
     """Salva um novo detector multigás no inventário."""
     try:
         db_client = get_supabase_client()
+        
+        # Verifica se o cliente foi inicializado corretamente
+        if db_client is None:
+            st.error("❌ Erro de conexão com o banco de dados")
+            return False
 
         # Verifica se o ID já existe
         df_inventory = db_client.get_data("inventario_multigas")
@@ -60,6 +65,11 @@ def save_multigas_inspection(data):
     """Salva um novo registro de teste (bump test ou calibração)."""
     try:
         db_client = get_supabase_client()
+        
+        # Verifica se o cliente foi inicializado corretamente
+        if db_client is None:
+            st.error("❌ Erro de conexão com o banco de dados")
+            return False
 
         action_plan = generate_multigas_action_plan(
             data.get('resultado_teste'), data.get('tipo_teste'))
@@ -95,6 +105,12 @@ def process_calibration_pdf_analysis(pdf_file):
         return None, "error"
 
     db_client = get_supabase_client()
+    
+    # Verifica se o cliente foi inicializado corretamente
+    if db_client is None:
+        st.error("❌ Erro de conexão com o banco de dados")
+        return None, "error"
+        
     inventory_data = db_client.get_data("inventario_multigas")
     detector_id = None
     status = "new_detector"
@@ -120,6 +136,11 @@ def update_cylinder_values(detector_id, new_cylinder_values):
     """
     try:
         db_client = get_supabase_client()
+        
+        # Verifica se o cliente foi inicializado corretamente
+        if db_client is None:
+            st.error("❌ Erro de conexão com o banco de dados")
+            return False
 
         updates = {
             'LEL_cilindro': new_cylinder_values.get('LEL'),
@@ -196,6 +217,11 @@ def get_detector_cylinder_values(detector_id):
     """
     try:
         db_client = get_supabase_client()
+        
+        # Verifica se o cliente foi inicializado corretamente
+        if db_client is None:
+            return None
+            
         df_inventory = db_client.get_data("inventario_multigas")
 
         if df_inventory.empty:
@@ -388,6 +414,11 @@ def save_multigas_action_log(detector_id, problem, action_taken, responsible, ph
     """
     try:
         db_client = get_supabase_client()
+        
+        # Verifica se o cliente foi inicializado corretamente
+        if db_client is None:
+            st.error("❌ Erro de conexão com o banco de dados")
+            return False
 
         photo_link = None
         if photo_file:

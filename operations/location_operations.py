@@ -10,6 +10,11 @@ def get_all_locations():
     """
     try:
         db_client = get_supabase_client()
+        
+        # Verifica se o cliente foi inicializado corretamente
+        if db_client is None:
+            return pd.DataFrame(columns=['id', 'local'])
+            
         df = db_client.get_data("locais")
 
         if df.empty:
@@ -50,6 +55,11 @@ def save_new_location(location_id, location_name):
     """
     try:
         db_client = get_supabase_client()
+        
+        # Verifica se o cliente foi inicializado corretamente
+        if db_client is None:
+            st.error("❌ Erro de conexão com o banco de dados")
+            return False
 
         df_locations = get_all_locations()
 
@@ -80,6 +90,11 @@ def update_location(location_id, new_location_name):
     """
     try:
         db_client = get_supabase_client()
+        
+        # Verifica se o cliente foi inicializado corretamente
+        if db_client is None:
+            st.error("❌ Erro de conexão com o banco de dados")
+            return False
 
         updates = {
             "local": new_location_name
@@ -103,6 +118,12 @@ def delete_location(location_id):
     """
     try:
         db_client = get_supabase_client()
+        
+        # Verifica se o cliente foi inicializado corretamente
+        if db_client is None:
+            st.error("❌ Erro de conexão com o banco de dados")
+            return False
+            
         # This is a placeholder for checking for associated equipment.
         # This should be implemented based on the database schema.
         # For now, we assume that if a location is in use, it should not be deleted.

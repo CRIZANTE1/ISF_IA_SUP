@@ -270,6 +270,11 @@ def save_new_location(location_id, description):
     """Salva um novo local na tabela 'locais'."""
     try:
         db_client = get_supabase_client()
+        
+        # Verifica se o cliente foi inicializado corretamente
+        if db_client is None:
+            st.error("❌ Erro de conexão com o banco de dados")
+            return False
 
         # Verifica se o ID já existe
         df_locations = db_client.get_data("locais")
@@ -318,6 +323,12 @@ def save_new_extinguisher(details_dict: dict) -> bool:
     """
     try:
         db_client = get_supabase_client()
+        
+        # Verifica se o cliente foi inicializado corretamente
+        if db_client is None:
+            st.error("❌ Erro de conexão com o banco de dados")
+            return False
+            
         ext_id = details_dict.get('numero_identificacao')
 
         # Verifica se o ID já existe

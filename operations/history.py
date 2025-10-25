@@ -19,6 +19,13 @@ def load_sheet_data(table_name: str) -> pd.DataFrame:
         
         logger.info(f"🔄 Carregando dados da tabela '{table_name}'...")
         db_client = get_supabase_client()
+        
+        # Verifica se o cliente foi inicializado corretamente
+        if db_client is None:
+            logger.error(f"❌ Cliente Supabase não pôde ser inicializado para tabela '{table_name}'")
+            st.error(f"Erro de conexão com o banco de dados para tabela '{table_name}'")
+            return pd.DataFrame()
+        
         data = db_client.get_data(table_name)
         
         if data is not None and not data.empty:

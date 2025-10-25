@@ -506,14 +506,10 @@ def _generate_chamber_section(row, chamber_number):
     if row.get('link_foto_nao_conformidade') and str(row['link_foto_nao_conformidade']).strip():
         photo_url = row['link_foto_nao_conformidade']
 
-        # Converte link do Google Drive para formato de download direto
-        if 'drive.google.com' in photo_url:
-            if '/file/d/' in photo_url:
-                file_id = photo_url.split('/file/d/')[1].split('/')[0]
-                photo_url = f"https://drive.google.com/uc?export=view&id={file_id}"
-            elif 'id=' in photo_url:
-                # Já está no formato correto
-                pass
+        # Converte link do Supabase para formato de download direto
+        if 'supabase' in photo_url:
+            # Link do Supabase já está no formato correto
+            pass
 
         html += f"""
         <div class="photo-section">

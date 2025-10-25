@@ -17,7 +17,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 def get_image_as_base64(url):
     """Baixa uma imagem de uma URL e a converte para o formato base64."""
-    if not isinstance(url, str) or not url.strip() or 'drive.google.com' not in url:
+    if not isinstance(url, str) or not url.strip() or 'supabase' not in url:
         return None
     try:
         response = requests.get(url, timeout=15)

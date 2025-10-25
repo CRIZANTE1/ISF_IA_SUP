@@ -2071,7 +2071,7 @@ def instru_foam_chamber():
         ### **Armazenamento e Segurança:**
 
         **Sistema ISF IA:**
-        - ✅ Fotos salvas no Google Drive
+        - ✅ Fotos salvas no Supabase
         - ✅ Backup automático
         - ✅ Vinculadas à inspeção
         - ✅ Acesso controlado
@@ -2299,7 +2299,7 @@ def instru_foam_chamber():
 
         **Evidências:**
         - 📸 Link para fotos de não conformidades
-        - 🔗 Acesso direto ao Google Drive
+        - 🔗 Acesso direto ao Supabase
 
         ---
 
@@ -3461,9 +3461,9 @@ def instru_mangueiras():
         **Seus dados estão seguros!**
 
         **Sistema faz backup automaticamente:**
-        - ✅ Google Sheets → Backup automático do Google
+        - ✅ Supabase → Backup automático
         - ✅ Versionamento automático (últimas 30 versões)
-        - ✅ Google Drive → Certificados e PDFs salvos
+        - ✅ Supabase → Certificados e PDFs salvos
         - ✅ Redundância em múltiplos data centers
 
         ---
@@ -3819,7 +3819,7 @@ def instru_dash():
         
         **Automaticamente:**
         1. ✅ Sistema registra a ação no log de auditoria
-        2. 📸 Foto é enviada para o Google Drive (se fornecida)
+        2. 📸 Foto é enviada para o Supabase (se fornecida)
         3. 🟢 Status do equipamento muda para "OK"
         4. 📅 Nova inspeção "aprovada" é registrada
         5. 🔄 Dashboard atualiza imediatamente
@@ -3928,7 +3928,7 @@ def instru_dash():
             
             - 📄 **Links para Certificados**
               - Acesso direto aos PDFs de teste
-              - Armazenados no Google Drive
+              - Armazenados no Supabase
             """)
 
         with st.expander("🧯 Recursos dos Abrigos"):
@@ -4242,7 +4242,7 @@ def instru_dash():
         
         --- ### **P: Como faço backup dos dados?**
         
-        **R:** Os dados estão automaticamente salvos no Google Sheets e Drive.
+        **R:** Os dados estão automaticamente salvos no Supabase.
         - Sistema faz backup automático na nuvem
         - Você pode gerar relatórios PDF para guardar offline
         - Histórico completo fica preservado permanentemente
@@ -4585,7 +4585,7 @@ def instru_dash():
         - Log de ações corretivas
         - Usuários e permissões
         
-        **Google Drive (Arquivos):**
+        **Supabase (Arquivos):**
         - Fotos de não conformidades
         - PDFs de certificados
         - Relatórios de manutenção

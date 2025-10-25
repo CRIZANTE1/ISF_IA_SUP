@@ -20,7 +20,8 @@ class PaymentWebhookHandler:
     """Classe para gerenciar webhooks de pagamento no Streamlit"""
 
     def __init__(self):
-        self.matrix_uploader = GoogleDriveUploader(is_matrix=True)
+        # Removido GoogleDriveUploader - código refatorado para Supabase
+        pass
 
     def process_payment_webhook(self, payment_data: Dict[str, Any]) -> bool:
         """

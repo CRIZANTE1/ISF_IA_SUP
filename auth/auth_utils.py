@@ -93,40 +93,6 @@ def get_users_data():
         return pd.DataFrame()
 
 
-def debug_user_lookup():
-    """Função de debug para verificar dados do usuário"""
-    try:
-        from supabase_local import get_supabase_client
-        import pandas as pd
-        
-        logger.info("🔍 DEBUG: Verificando dados diretamente no Supabase...")
-        
-        # Conecta diretamente ao Supabase
-        db_client = get_supabase_client()
-        
-        # Busca todos os usuários
-        users_data = db_client.get_data("usuarios")
-        logger.info(f"📊 Total de usuários no banco: {len(users_data)}")
-        
-        if not users_data.empty:
-            logger.info(f"📋 Colunas: {list(users_data.columns)}")
-            logger.info(f"📧 Emails: {users_data['email'].tolist()}")
-            
-            # Verifica se o email do usuário atual está na lista
-            current_email = get_user_email()
-            logger.info(f"🔍 Email atual: {current_email}")
-            
-            if current_email in users_data['email'].values:
-                user_row = users_data[users_data['email'] == current_email]
-                logger.info(f"✅ Usuário encontrado: {user_row.iloc[0].to_dict()}")
-            else:
-                logger.warning(f"❌ Email {current_email} não encontrado na tabela")
-        else:
-            logger.warning("❌ Tabela de usuários está vazia")
-            
-    except Exception as e:
-        logger.error(f"❌ Erro no debug: {e}")
-
 def get_user_info() -> dict | None:
     """
     Retorna o registro do usuário. Se for o superusuário, "fabrica" o registro
@@ -152,9 +118,6 @@ def get_user_info() -> dict | None:
         logger.warning("Email do usuário não encontrado")
         return None
     
-    # DEBUG: Verifica dados diretamente no Supabase
-    debug_user_lookup()
-    
     logger.info(f"🔍 Buscando usuário: {user_email}")
     users_df = get_users_data()
     
@@ -162,22 +125,84 @@ def get_user_info() -> dict | None:
         logger.warning("❌ Tabela de usuários está vazia")
         return None
     
-    logger.info(f"📊 Total de usuários encontrados: {len(users_df)}")
-    logger.info(f"📧 Emails na tabela: {users_df['email'].tolist() if 'email' in users_df.columns else 'Coluna email não encontrada'}")
-    
     user_entry = users_df[users_df['email'] == user_email]
     
     if user_entry.empty:
         logger.warning(f"❌ Usuário {user_email} não encontrado na tabela")
         return None
     
-    logger.info(f"✅ Usuário encontrado: {user_entry.iloc[0].to_dict()}")
+    logger.info(f"✅ Usuário encontrado: {user_email}")
     return user_entry.iloc[0].to_dict()
 
+
+def regenerate_user_uuid(user_email: str) -> int:
+    """
+    Força a regeneração de UUID para um usuário existente.
+    Útil para atualizar IDs antigos para UUIDs mais fortes.
+    
+    Args:
+        user_email: Email do usuário
+        
+    Returns:
+        int: Novo UUID forte
+    """
+    logger.info(f"🔄 Regenerando UUID forte para {user_email}...")
+    
+    new_uuid = generate_strong_uuid(user_email)
+    
+    try:
+        from supabase_local import get_supabase_client
+        db_client = get_supabase_client()
+        
+        # Atualiza o registro do usuário com o novo UUID
+        update_data = {'id': new_uuid}
+        db_client.update_data("usuarios", update_data, "email", user_email)
+        
+        logger.info(f"✅ Novo UUID forte {new_uuid} salvo para {user_email}")
+        return new_uuid
+        
+    except Exception as e:
+        logger.error(f"❌ Erro ao salvar novo UUID: {e}")
+        return new_uuid
+
+def generate_strong_uuid(user_email: str) -> int:
+    """
+    Gera um UUID forte e único para o usuário.
+    
+    Args:
+        user_email: Email do usuário
+        
+    Returns:
+        int: UUID forte como inteiro
+    """
+    import hashlib
+    import time
+    import random
+    import uuid
+    
+    # Método 1: UUID4 padrão (mais forte)
+    uuid4_string = str(uuid.uuid4()).replace('-', '')
+    uuid4_int = int(uuid4_string[:15], 16)  # Converte para int
+    
+    # Método 2: Hash SHA-256 com múltiplos fatores
+    timestamp = str(int(time.time() * 1000000))  # microsegundos
+    random_salt = str(random.randint(1000000, 9999999))
+    email_hash = hashlib.sha256(user_email.encode()).hexdigest()[:8]
+    
+    combined_string = f"{user_email}{timestamp}{random_salt}{email_hash}"
+    strong_hash = hashlib.sha256(combined_string.encode()).hexdigest()
+    hash_int = int(strong_hash[:12], 16)
+    
+    # Combina ambos os métodos para máxima robustez
+    final_uuid = (uuid4_int + hash_int) % (10**15)  # Limita a 15 dígitos
+    
+    logger.info(f"🔐 UUID forte gerado: {final_uuid} (método combinado)")
+    return final_uuid
 
 def get_user_id() -> int:
     """
     Retorna o ID (INTEGER) do usuário logado.
+    Se o usuário não tiver ID, gera um temporário baseado no email.
     
     Returns:
         int: ID do usuário ou None se não encontrado
@@ -189,17 +214,46 @@ def get_user_id() -> int:
         return None
     
     user_id = user_info.get('id')
+    user_email = user_info.get('email')
     
-    if not user_id:
-        logger.error(f"Usuário {user_info.get('email')} não possui ID na tabela usuarios!")
-        return None
+    # Converte ID para inteiro se for string
+    if user_id is not None:
+        try:
+            user_id = int(user_id)
+            
+            # Verifica se é um ID simples (como 1, 2, 3) que precisa ser atualizado
+            if user_id < 1000:  # IDs simples precisam ser atualizados para UUID forte
+                logger.info(f"🔄 ID simples detectado ({user_id}) - atualizando para UUID forte...")
+                return regenerate_user_uuid(user_email)
+            
+            logger.info(f"✅ ID do usuário {user_email}: {user_id}")
+            return user_id
+        except (ValueError, TypeError):
+            logger.warning(f"ID do usuário não é um número válido: {user_id}")
     
-    # Garante que retorna um inteiro
+    # Se não tem ID ou é inválido, gera um UUID forte
+    logger.warning(f"Usuário {user_email} não possui ID válido na tabela usuarios!")
+    logger.info("🔧 Gerando UUID forte usando método combinado...")
+    
+    # Gera UUID forte usando método combinado
+    temp_id = generate_strong_uuid(user_email)
+    
+    # Tenta atualizar o registro no banco com o ID gerado
     try:
-        return int(user_id)
-    except (ValueError, TypeError):
-        logger.error(f"ID do usuário não é um número válido: {user_id}")
-        return None
+        from supabase_local import get_supabase_client
+        db_client = get_supabase_client()
+        
+        # Atualiza o registro do usuário com o ID gerado
+        update_data = {'id': temp_id}
+        db_client.update_data("usuarios", update_data, "email", user_email)
+        
+        logger.info(f"✅ UUID forte {temp_id} salvo no banco para {user_email}")
+        return temp_id
+        
+    except Exception as e:
+        logger.error(f"❌ Erro ao salvar UUID forte: {e}")
+        # Retorna o UUID mesmo se não conseguir salvar
+        return temp_id
 
 
 def save_access_request(user_name, user_email, justification):
@@ -361,13 +415,21 @@ def setup_sidebar():
         return False
     
     effective_status = get_effective_user_status()
-    user_id = user_info.get('id')
     user_email = user_info.get('email')
     
-    # Valida que o usuário tem ID
+    # Obtém o user_id (gera automaticamente se não existir)
+    user_id = get_user_id()
     if not user_id:
-        st.sidebar.error("❌ Usuário sem ID no banco de dados.")
-        logger.error(f"Usuário {user_email} não possui ID!")
+        st.sidebar.error("❌ Erro ao obter ID do usuário.")
+        logger.error(f"Usuário {user_email} - erro ao obter ID!")
+        return False
+    
+    # Garante que user_id é inteiro
+    try:
+        user_id = int(user_id)
+    except (ValueError, TypeError):
+        logger.error(f"ID do usuário não é um número válido: {user_id}")
+        st.sidebar.error("❌ ID do usuário inválido.")
         return False
     
     # Valida status do usuário

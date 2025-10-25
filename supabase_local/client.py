@@ -108,7 +108,10 @@ class SupabaseClient:
             # Evita dependência circular - obtém user_id diretamente da sessão
             user_id = st.session_state.get('current_user_id')
             if user_id:
-                return int(user_id)
+                try:
+                    return int(user_id)
+                except (ValueError, TypeError):
+                    logger.warning(f"user_id na sessão não é um número válido: {user_id}")
             
             # Fallback: tenta obter via consulta direta ao Supabase
             # para evitar dependência circular com auth_utils
@@ -118,7 +121,12 @@ class SupabaseClient:
                     # Consulta direta ao Supabase para obter user_id
                     response = self.client.table("usuarios").select("id").eq("email", user_email).execute()
                     if response.data:
-                        return int(response.data[0]['id'])
+                        raw_id = response.data[0]['id']
+                        try:
+                            return int(raw_id)
+                        except (ValueError, TypeError):
+                            logger.warning(f"ID do Supabase não é um número válido: {raw_id}")
+                            return None
             except Exception as fallback_error:
                 logger.warning(f"Fallback para obter user_id falhou: {fallback_error}")
             

@@ -48,7 +48,7 @@ class APIKeyManager:
         # Fallback: chave principal do general
         if not keys:
             try:
-                main_key = st.secrets["general"]["GOOGLE_API_KEY"]
+                main_key = st.secrets.get("google_ai", {}).get("api_key")
                 if main_key:
                     keys.append(main_key)
                     logger.info(

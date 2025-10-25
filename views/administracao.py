@@ -5,7 +5,7 @@ from datetime import date, timedelta, datetime
 import altair as alt
 
 # Imports do projeto
-from database.supabase_client import get_supabase_client
+from supabase.client import get_supabase_client
 from auth.auth_utils import get_users_data
 from config.page_config import set_page_config
 from config.table_names import (

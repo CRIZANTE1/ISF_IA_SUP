@@ -1,0 +1,49 @@
+# Exemplo de configuração do Streamlit
+# Copie este arquivo para .streamlit/config.toml e ajuste conforme necessário
+
+[server]
+# Porta do servidor (padrão: 8501)
+port = 8501
+
+# Habilitar CORS (Cross-Origin Resource Sharing)
+enableCORS = false
+
+# Habilitar proteção XSRF
+enableXsrfProtection = true
+
+# Tamanho máximo de upload (em MB)
+maxUploadSize = 200
+
+# Timeout para operações (em segundos)
+runOnSave = true
+
+[browser]
+# Coletar estatísticas de uso
+gatherUsageStats = false
+
+# Servidor de desenvolvimento
+serverAddress = "localhost"
+
+[theme]
+# Cores do tema
+primaryColor = "#FF6B6B"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F0F2F6"
+textColor = "#262730"
+
+# Fonte
+font = "sans serif"
+
+[logger]
+# Nível de log
+level = "info"
+
+[client]
+# Mostrar erros no frontend
+showErrorDetails = true
+
+# Habilitar cache
+caching = true
+
+# Tamanho do cache (em MB)
+cacheSizeLimit = 200

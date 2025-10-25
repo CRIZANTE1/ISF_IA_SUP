@@ -72,8 +72,8 @@ class MercadoPagoPayment:
 
     def __init__(self):
         try:
-            self.public_key = st.secrets["mercadopago"]["public_key"]
-            self.api_url = st.secrets["payment"]["api_url"]
+            self.public_key = st.secrets.get("mercadopago", {}).get("public_key")
+            self.api_url = st.secrets.get("payment", {}).get("api_url")
         except KeyError as e:
             logger.error(f"Configuração de pagamento não encontrada: {e}")
             self.public_key = None

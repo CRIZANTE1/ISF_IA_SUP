@@ -34,8 +34,7 @@ def is_user_logged_in():
 def is_superuser() -> bool:
     try:
         user_email = get_user_email()
-        superuser_email = st.secrets["superuser"]["admin_email"].lower(
-        ).strip()
+        superuser_email = st.secrets.get("superuser", {}).get("admin_email", "").lower().strip()
         return user_email is not None and user_email == superuser_email
     except (KeyError, AttributeError):
         return False
@@ -101,8 +100,8 @@ def get_user_info() -> dict | None:
             'role': 'admin',
             'plano': 'premium_ia',
             'status': 'ativo',
-            'spreadsheet_id': st.secrets["superuser"].get("spreadsheet_id"),
-            'folder_id': st.secrets["superuser"].get("folder_id"),
+            'spreadsheet_id': st.secrets.get("superuser", {}).get("spreadsheet_id"),
+            'folder_id': st.secrets.get("superuser", {}).get("folder_id"),
             'data_cadastro': date.today().isoformat(),
             'trial_end_date': None
         }

@@ -110,6 +110,36 @@ class SupabaseClient:
         except Exception:
             return False
 
+    def _get_user_email_directly(self) -> str | None:
+        """Obtém o email do usuário diretamente do Streamlit, sem dependências circulares."""
+        try:
+            if hasattr(st.user, 'email') and st.user.email:
+                email = st.user.email
+                if isinstance(email, str):
+                    return email.lower().strip()
+            return None
+        except Exception:
+            return None
+
+    def _get_users_data_directly(self) -> pd.DataFrame:
+        """Obtém dados de usuários diretamente do Supabase, sem cache do Streamlit."""
+        try:
+            # Busca diretamente na tabela usuarios sem usar auth_utils
+            users_data = self.get_data("usuarios")
+            if users_data is not None and not users_data.empty:
+                # Converte colunas de data que vêm como string do Supabase
+                if 'data_cadastro' in users_data.columns:
+                    users_data['data_cadastro'] = pd.to_datetime(
+                        users_data['data_cadastro'], errors='coerce').dt.date
+                if 'trial_end_date' in users_data.columns:
+                    users_data['trial_end_date'] = pd.to_datetime(
+                        users_data['trial_end_date'], errors='coerce').dt.date
+                return users_data
+            return pd.DataFrame()
+        except Exception as e:
+            logger.warning(f"Erro ao obter dados de usuários diretamente: {e}")
+            return pd.DataFrame()
+
     def _get_current_user_id(self) -> int | None:
         """Obtém o user_id (INTEGER) do usuário logado da sessão."""
         try:
@@ -121,16 +151,28 @@ class SupabaseClient:
                 except (ValueError, TypeError):
                     logger.warning(f"user_id na sessão não é um número válido: {user_id}")
             
-            # Se não tem na sessão, tenta obter via auth_utils (evita loop)
+            # QUEBRA A DEPENDÊNCIA CIRCULAR: obtém user_id diretamente do Supabase
+            # sem passar por auth_utils que chama get_supabase_client novamente
             try:
-                from auth.auth_utils import get_user_id
-                user_id = get_user_id()
-                if user_id:
-                    # Armazena na sessão para próximas consultas
-                    st.session_state['current_user_id'] = user_id
-                    return user_id
-            except Exception as auth_error:
-                logger.warning(f"Erro ao obter user_id via auth_utils: {auth_error}")
+                user_email = self._get_user_email_directly()
+                if user_email:
+                    # Busca diretamente na tabela usuarios sem usar auth_utils
+                    users_data = self._get_users_data_directly()
+                    if not users_data.empty:
+                        user_entry = users_data[users_data['email'] == user_email]
+                        if not user_entry.empty:
+                            user_id = user_entry.iloc[0].get('id')
+                            if user_id:
+                                try:
+                                    user_id = int(user_id)
+                                    # Armazena na sessão para próximas consultas
+                                    st.session_state['current_user_id'] = user_id
+                                    logger.info(f"✅ User ID obtido diretamente: {user_id}")
+                                    return user_id
+                                except (ValueError, TypeError):
+                                    logger.warning(f"ID do usuário não é um número válido: {user_id}")
+            except Exception as direct_error:
+                logger.warning(f"Erro ao obter user_id diretamente: {direct_error}")
             
             # Se não conseguiu obter user_id, retorna None (não falha)
             logger.info("ℹ️ user_id não disponível - operações serão limitadas")
@@ -356,16 +398,50 @@ def get_supabase_client() -> SupabaseClient | None:
         if 'supabase_client' in st.session_state:
             return st.session_state['supabase_client']
         
-        logger.info("🔄 Inicializando cliente Supabase...")
-        client = SupabaseClient()
-        logger.info("✅ Cliente Supabase criado com sucesso")
+        # Verifica se há uma inicialização em andamento para evitar loops
+        if 'supabase_client_initializing' in st.session_state:
+            logger.warning("⚠️ Cliente Supabase já está sendo inicializado - evitando loop")
+            return None
         
-        # Armazena na sessão para reutilização
-        st.session_state['supabase_client'] = client
-        return client
+        # Marca que está inicializando
+        st.session_state['supabase_client_initializing'] = True
+        
+        logger.info("🔄 Inicializando cliente Supabase...")
+        
+        # Timeout para evitar carregamento infinito
+        import time
+        start_time = time.time()
+        timeout_seconds = 30  # 30 segundos de timeout
+        
+        try:
+            client = SupabaseClient()
+            
+            # Verifica se não excedeu o timeout
+            elapsed_time = time.time() - start_time
+            if elapsed_time > timeout_seconds:
+                logger.error(f"❌ Timeout na inicialização do cliente Supabase ({elapsed_time:.2f}s)")
+                st.error("Timeout na conexão com o banco de dados")
+                return None
+            
+            logger.info(f"✅ Cliente Supabase criado com sucesso em {elapsed_time:.2f}s")
+            
+            # Armazena na sessão para reutilização
+            st.session_state['supabase_client'] = client
+            return client
+            
+        finally:
+            # Remove a flag de inicialização
+            if 'supabase_client_initializing' in st.session_state:
+                del st.session_state['supabase_client_initializing']
+                
     except Exception as e:
         logger.error(f"❌ Falha crítica ao criar cliente Supabase: {e}")
         st.error(f"Erro crítico de conexão: {e}")
+        
+        # Remove a flag de inicialização em caso de erro
+        if 'supabase_client_initializing' in st.session_state:
+            del st.session_state['supabase_client_initializing']
+        
         return None
 
 

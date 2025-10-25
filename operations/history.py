@@ -14,10 +14,24 @@ def load_sheet_data(table_name: str) -> pd.DataFrame:
         DataFrame com os dados da tabela
     """
     try:
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        logger.info(f"🔄 Carregando dados da tabela '{table_name}'...")
         db_client = get_supabase_client()
         data = db_client.get_data(table_name)
-        return pd.DataFrame(data) if data else pd.DataFrame()
+        
+        if data is not None and not data.empty:
+            logger.info(f"✅ Dados carregados: {len(data)} registros da tabela '{table_name}'")
+            return pd.DataFrame(data)
+        else:
+            logger.warning(f"⚠️ Tabela '{table_name}' retornou dados vazios")
+            return pd.DataFrame()
+            
     except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"❌ Erro ao carregar dados da tabela '{table_name}': {e}")
         st.error(f"Erro ao carregar dados da tabela '{table_name}': {e}")
         return pd.DataFrame()
 

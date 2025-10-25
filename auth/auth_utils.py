@@ -68,10 +68,13 @@ def get_users_data():
     Carrega dados de usuários com tratamento robusto de erros, agora do Supabase.
     """
     try:
+        logger.info("🔄 Carregando dados de usuários do Supabase...")
         # PARA: A lógica complexa de leitura e normalização foi substituída por uma única chamada.
         df = load_sheet_data("usuarios")
-
+        
+        logger.info(f"📊 Dados carregados: {len(df)} registros")
         if not df.empty:
+            logger.info(f"📋 Colunas disponíveis: {list(df.columns)}")
             # Converte colunas de data que vêm como string do Supabase
             if 'data_cadastro' in df.columns:
                 df['data_cadastro'] = pd.to_datetime(
@@ -79,13 +82,50 @@ def get_users_data():
             if 'trial_end_date' in df.columns:
                 df['trial_end_date'] = pd.to_datetime(
                     df['trial_end_date'], errors='coerce').dt.date
+        else:
+            logger.warning("⚠️ Tabela de usuários está vazia")
 
         return df
 
     except Exception as e:
+        logger.error(f"❌ Erro crítico ao carregar dados de usuários: {e}")
         st.error(f"Erro crítico ao carregar dados de usuários: {e}")
         return pd.DataFrame()
 
+
+def debug_user_lookup():
+    """Função de debug para verificar dados do usuário"""
+    try:
+        from supabase_local import get_supabase_client
+        import pandas as pd
+        
+        logger.info("🔍 DEBUG: Verificando dados diretamente no Supabase...")
+        
+        # Conecta diretamente ao Supabase
+        db_client = get_supabase_client()
+        
+        # Busca todos os usuários
+        users_data = db_client.get_data("usuarios")
+        logger.info(f"📊 Total de usuários no banco: {len(users_data)}")
+        
+        if not users_data.empty:
+            logger.info(f"📋 Colunas: {list(users_data.columns)}")
+            logger.info(f"📧 Emails: {users_data['email'].tolist()}")
+            
+            # Verifica se o email do usuário atual está na lista
+            current_email = get_user_email()
+            logger.info(f"🔍 Email atual: {current_email}")
+            
+            if current_email in users_data['email'].values:
+                user_row = users_data[users_data['email'] == current_email]
+                logger.info(f"✅ Usuário encontrado: {user_row.iloc[0].to_dict()}")
+            else:
+                logger.warning(f"❌ Email {current_email} não encontrado na tabela")
+        else:
+            logger.warning("❌ Tabela de usuários está vazia")
+            
+    except Exception as e:
+        logger.error(f"❌ Erro no debug: {e}")
 
 def get_user_info() -> dict | None:
     """
@@ -109,13 +149,30 @@ def get_user_info() -> dict | None:
     # Se não for o superusuário, executa a lógica normal.
     user_email = get_user_email()
     if not user_email:
+        logger.warning("Email do usuário não encontrado")
         return None
+    
+    # DEBUG: Verifica dados diretamente no Supabase
+    debug_user_lookup()
+    
+    logger.info(f"🔍 Buscando usuário: {user_email}")
     users_df = get_users_data()
+    
     if users_df.empty:
+        logger.warning("❌ Tabela de usuários está vazia")
         return None
-
+    
+    logger.info(f"📊 Total de usuários encontrados: {len(users_df)}")
+    logger.info(f"📧 Emails na tabela: {users_df['email'].tolist() if 'email' in users_df.columns else 'Coluna email não encontrada'}")
+    
     user_entry = users_df[users_df['email'] == user_email]
-    return user_entry.iloc[0].to_dict() if not user_entry.empty else None
+    
+    if user_entry.empty:
+        logger.warning(f"❌ Usuário {user_email} não encontrado na tabela")
+        return None
+    
+    logger.info(f"✅ Usuário encontrado: {user_entry.iloc[0].to_dict()}")
+    return user_entry.iloc[0].to_dict()
 
 
 def get_user_id() -> int:

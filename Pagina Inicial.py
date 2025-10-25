@@ -16,11 +16,33 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 if current_dir not in sys.path:
     sys.path.insert(0, current_dir)
 
-from views import administracao, dashboard, resumo_gerencial, inspecao_extintores, \
-                  inspecao_mangueiras, inspecao_scba, inspecao_chuveiros, \
-                  inspecao_camaras_espuma, inspecao_multigas, historico, inspecao_alarmes, \
-                  utilitarios, demo_page, trial_expired_page, inspecao_canhoes_monitores
-from views import is_perfil_available
+# Importações das páginas
+import pages.01_Dashboard as dashboard_page
+import pages.02_Resumo_Gerencial as resumo_gerencial_page
+import pages.03_Extintores as extintores_page
+import pages.04_Mangueiras as mangueiras_page
+import pages.05_SCBA as scba_page
+import pages.06_Chuveiros_LO as chuveiros_page
+import pages.07_Camaras_Espuma as camaras_espuma_page
+import pages.08_Multigas as multigas_page
+import pages.11_Historico_Logs as historico_page
+import pages.09_Alarmes as alarmes_page
+import pages.12_Utilitarios as utilitarios_page
+import pages.10_Canhoes_Monitores as canhoes_monitores_page
+import pages.14_Super_Admin as administracao_page
+
+# Importações das páginas especiais
+import pages.demo as demo_page
+import pages.trial_expired as trial_expired_page
+
+# Função utilitária para verificar se o perfil está disponível
+def is_perfil_available():
+    """Verifica se o módulo perfil_usuario está disponível"""
+    try:
+        from views import perfil_usuario
+        return True
+    except ImportError:
+        return False
 
 set_page_config()
 
@@ -30,6 +52,17 @@ if PERFIL_DISPONIVEL:
     from views import perfil_usuario
 
 
+def create_page_function(page_module, title):
+    """Cria uma função que executa uma página importada"""
+    def page_wrapper():
+        try:
+            # Executa a página importada
+            page_module.show_page()
+        except Exception as e:
+            st.error(f"Erro ao carregar a página {title}: {e}")
+    
+    return page_wrapper
+
 def get_navigation_pages():
     """Cria a estrutura de navegação baseada nas permissões do usuário"""
     try:
@@ -38,57 +71,84 @@ def get_navigation_pages():
         
         # Páginas base
         pages = {}
+        
+        # Grupo: Dashboard e Relatórios
+        dashboard_pages = []
+        if user_plan in ['pro', 'premium_ia'] and user_role != 'viewer':
+            dashboard_pages.append(st.Page(
+                create_page_function(dashboard_page, "Dashboard"),
+                title="Dashboard"
+            ))
+        dashboard_pages.append(st.Page(
+            create_page_function(resumo_gerencial_page, "Resumo Gerencial"),
+            title="Resumo Gerencial"
+        ))
+        
+        if dashboard_pages:
+            pages["📊 Dashboard e Relatórios"] = dashboard_pages
+        
+        # Grupo: Inspeções
+        inspection_pages = []
+        if user_plan in ['pro', 'premium_ia'] and user_role != 'viewer':
+            inspection_pages.extend([
+                st.Page(create_page_function(extintores_page, "Extintores"), title="Extintores"),
+                st.Page(create_page_function(mangueiras_page, "Mangueiras"), title="Mangueiras"),
+                st.Page(create_page_function(scba_page, "SCBA"), title="SCBA"),
+                st.Page(create_page_function(chuveiros_page, "Chuveiros/LO"), title="Chuveiros/LO"),
+                st.Page(create_page_function(camaras_espuma_page, "Câmaras de Espuma"), title="Câmaras de Espuma"),
+                st.Page(create_page_function(multigas_page, "Multigás"), title="Multigás"),
+                st.Page(create_page_function(alarmes_page, "Alarmes"), title="Alarmes"),
+                st.Page(create_page_function(canhoes_monitores_page, "Canhões Monitores"), title="Canhões Monitores")
+            ])
+        
+        if inspection_pages:
+            pages["🔍 Inspeções"] = inspection_pages
+        
+        # Grupo: Histórico e Utilitários
+        utility_pages = []
+        if user_plan in ['pro', 'premium_ia']:
+            utility_pages.append(st.Page(
+                create_page_function(historico_page, "Histórico e Logs"),
+                title="Histórico e Logs"
+            ))
+        if user_plan in ['pro', 'premium_ia'] and user_role != 'viewer':
+            utility_pages.append(st.Page(
+                create_page_function(utilitarios_page, "Utilitários"),
+                title="Utilitários"
+            ))
+        
+        if utility_pages:
+            pages["⚙️ Histórico e Utilitários"] = utility_pages
+        
+        # Grupo: Perfil e Administração
+        admin_pages = []
+        if PERFIL_DISPONIVEL:
+            admin_pages.append(st.Page(
+                create_page_function(perfil_usuario, "Meu Perfil"),
+                title="Meu Perfil"
+            ))
+        if is_admin():
+            admin_pages.append(st.Page(
+                create_page_function(administracao_page, "Super Admin"),
+                title="Super Admin"
+            ))
+        
+        if admin_pages:
+            pages["👤 Perfil e Administração"] = admin_pages
+        
+        return pages
+        
     except Exception as e:
         st.error(f"Erro ao obter informações do usuário: {e}")
-        return {}
-    
-    # Grupo: Dashboard e Relatórios
-    dashboard_pages = []
-    if user_plan in ['pro', 'premium_ia'] and user_role != 'viewer':
-        dashboard_pages.append(st.Page("pages/01_Dashboard.py", title="Dashboard"))
-    dashboard_pages.append(st.Page("pages/02_Resumo_Gerencial.py", title="Resumo Gerencial"))
-    
-    if dashboard_pages:
-        pages["📊 Dashboard e Relatórios"] = dashboard_pages
-    
-    # Grupo: Inspeções
-    inspection_pages = []
-    if user_plan in ['pro', 'premium_ia'] and user_role != 'viewer':
-        inspection_pages.extend([
-            st.Page("pages/03_Extintores.py", title="Extintores"),
-            st.Page("pages/04_Mangueiras.py", title="Mangueiras"),
-            st.Page("pages/05_SCBA.py", title="SCBA"),
-            st.Page("pages/06_Chuveiros_LO.py", title="Chuveiros/LO"),
-            st.Page("pages/07_Camaras_Espuma.py", title="Câmaras de Espuma"),
-            st.Page("pages/08_Multigas.py", title="Multigás"),
-            st.Page("pages/09_Alarmes.py", title="Alarmes"),
-            st.Page("pages/10_Canhoes_Monitores.py", title="Canhões Monitores")
-        ])
-    
-    if inspection_pages:
-        pages["🔍 Inspeções"] = inspection_pages
-    
-    # Grupo: Histórico e Utilitários
-    utility_pages = []
-    if user_plan in ['pro', 'premium_ia']:
-        utility_pages.append(st.Page("pages/11_Historico_Logs.py", title="Histórico e Logs"))
-    if user_plan in ['pro', 'premium_ia'] and user_role != 'viewer':
-        utility_pages.append(st.Page("pages/12_Utilitarios.py", title="Utilitários"))
-    
-    if utility_pages:
-        pages["⚙️ Histórico e Utilitários"] = utility_pages
-    
-    # Grupo: Perfil e Administração
-    admin_pages = []
-    if PERFIL_DISPONIVEL:
-        admin_pages.append(st.Page("pages/13_Meu_Perfil.py", title="Meu Perfil"))
-    if is_admin():
-        admin_pages.append(st.Page("pages/14_Super_Admin.py", title="Super Admin"))
-    
-    if admin_pages:
-        pages["👤 Perfil e Administração"] = admin_pages
-    
-    return pages
+        # Retorna páginas básicas em caso de erro
+        return {
+            "📊 Dashboard e Relatórios": [
+                st.Page(
+                    create_page_function(resumo_gerencial_page, "Resumo Gerencial"),
+                    title="Resumo Gerencial"
+                )
+            ]
+        }
 
 def main():
     """Função principal do aplicativo"""

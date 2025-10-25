@@ -10,5 +10,5 @@ if parent_dir not in sys.path:
 
 from views.inspecao_extintores import show_page
 
-def page_extintores():
-    show_page()
+# Executa a página diretamente
+show_page()

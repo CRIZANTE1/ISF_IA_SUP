@@ -95,6 +95,41 @@ def get_users_data():
         return pd.DataFrame()
 
 
+def get_users_data_no_cache():
+    """
+    Versão sem cache para debug - carrega dados de usuários diretamente do Supabase.
+    """
+    try:
+        logger.info("🔄 Carregando dados de usuários do Supabase (sem cache)...")
+        from supabase_local import get_supabase_client
+        
+        db_client = get_supabase_client()
+        if db_client is None:
+            logger.error("❌ Cliente Supabase não disponível")
+            return pd.DataFrame()
+        
+        df = db_client.get_data("usuarios")
+        
+        logger.info(f"📊 Dados carregados (sem cache): {len(df)} registros")
+        if not df.empty:
+            logger.info(f"📋 Colunas disponíveis: {list(df.columns)}")
+            # Converte colunas de data que vêm como string do Supabase
+            if 'data_cadastro' in df.columns:
+                df['data_cadastro'] = pd.to_datetime(
+                    df['data_cadastro'], errors='coerce').dt.date
+            if 'trial_end_date' in df.columns:
+                df['trial_end_date'] = pd.to_datetime(
+                    df['trial_end_date'], errors='coerce').dt.date
+        else:
+            logger.warning("⚠️ Tabela de usuários está vazia (sem cache)")
+
+        return df
+
+    except Exception as e:
+        logger.error(f"❌ Erro crítico ao carregar dados de usuários (sem cache): {e}")
+        return pd.DataFrame()
+
+
 def get_user_info() -> dict | None:
     """
     Retorna o registro do usuário. Se for o superusuário, primeiro tenta buscar na tabela,
@@ -108,17 +143,45 @@ def get_user_info() -> dict | None:
     logger.info(f"🔍 Buscando usuário: {user_email}")
     users_df = get_users_data()
     
+    logger.info(f"📊 DataFrame de usuários carregado: {len(users_df)} registros")
     if not users_df.empty:
+        logger.info(f"📋 Colunas disponíveis: {list(users_df.columns)}")
+        logger.info(f"📧 Emails na tabela: {users_df['email'].tolist() if 'email' in users_df.columns else 'Coluna email não encontrada'}")
+        
         user_entry = users_df[users_df['email'] == user_email]
+        logger.info(f"🔍 Busca por '{user_email}': {len(user_entry)} resultados encontrados")
         
         if not user_entry.empty:
             logger.info(f"✅ Usuário encontrado na tabela: {user_email}")
-            return user_entry.iloc[0].to_dict()
+            user_data = user_entry.iloc[0].to_dict()
+            logger.info(f"📋 Dados do usuário: {user_data}")
+            return user_data
+        else:
+            logger.warning(f"❌ Usuário '{user_email}' não encontrado na tabela")
+            # Tenta buscar sem cache para debug
+            logger.info("🔍 Tentando busca sem cache para debug...")
+            users_df_no_cache = get_users_data_no_cache()
+            if not users_df_no_cache.empty:
+                logger.info(f"📊 DataFrame sem cache: {len(users_df_no_cache)} registros")
+                logger.info(f"📧 Emails na tabela (sem cache): {users_df_no_cache['email'].tolist() if 'email' in users_df_no_cache.columns else 'Coluna email não encontrada'}")
+                user_entry_no_cache = users_df_no_cache[users_df_no_cache['email'] == user_email]
+                if not user_entry_no_cache.empty:
+                    logger.info(f"✅ Usuário encontrado na busca sem cache: {user_email}")
+                    user_data = user_entry_no_cache.iloc[0].to_dict()
+                    logger.info(f"📋 Dados do usuário (sem cache): {user_data}")
+                    return user_data
+    else:
+        logger.warning("⚠️ DataFrame de usuários está vazio")
     
     # Se não encontrou na tabela e é superuser, fabrica o registro
     if is_superuser():
         logger.info("👑 Superuser não encontrado na tabela - fabricando registro")
-        return {
+        # Gera um ID único para o superuser se não existir
+        superuser_id = generate_strong_uuid(user_email)
+        
+        # Cria o registro do superuser
+        superuser_record = {
+            'id': superuser_id,
             'email': user_email,
             'nome': 'Desenvolvedor (Mestre)',
             'role': 'admin',
@@ -129,6 +192,20 @@ def get_user_info() -> dict | None:
             'data_cadastro': date.today().isoformat(),
             'trial_end_date': None
         }
+        
+        # Tenta salvar o superuser na tabela para evitar fabricação repetida
+        try:
+            from supabase_local import get_supabase_client
+            db_client = get_supabase_client()
+            if db_client is not None:
+                db_client.append_data("usuarios", superuser_record)
+                logger.info(f"✅ Superuser {user_email} salvo na tabela usuarios com ID {superuser_id}")
+            else:
+                logger.warning("⚠️ Cliente Supabase não disponível - usando registro fabricado")
+        except Exception as e:
+            logger.warning(f"⚠️ Erro ao salvar superuser na tabela: {e} - usando registro fabricado")
+        
+        return superuser_record
     
     # Se não é superuser e não encontrou na tabela
     logger.warning(f"❌ Usuário {user_email} não encontrado na tabela")

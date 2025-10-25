@@ -132,6 +132,8 @@ class SupabaseClient:
             except Exception as auth_error:
                 logger.warning(f"Erro ao obter user_id via auth_utils: {auth_error}")
             
+            # Se não conseguiu obter user_id, retorna None (não falha)
+            logger.info("ℹ️ user_id não disponível - operações serão limitadas")
             return None
         except Exception as e:
             logger.warning(f"Não foi possível obter user_id: {e}")
@@ -347,19 +349,24 @@ class SupabaseClient:
             raise
 
 
-@st.cache_resource
 def get_supabase_client() -> SupabaseClient | None:
-    """Retorna instância única (singleton) do cliente Supabase."""
+    """Retorna instância do cliente Supabase."""
     try:
+        # Verifica se já existe na sessão para evitar recriação desnecessária
+        if 'supabase_client' in st.session_state:
+            return st.session_state['supabase_client']
+        
         logger.info("🔄 Inicializando cliente Supabase...")
         client = SupabaseClient()
         logger.info("✅ Cliente Supabase criado com sucesso")
+        
+        # Armazena na sessão para reutilização
+        st.session_state['supabase_client'] = client
         return client
     except Exception as e:
         logger.error(f"❌ Falha crítica ao criar cliente Supabase: {e}")
-        # Não retorna None para evitar erros em cascata
-        # O erro já foi tratado no _initialize_client com st.stop()
-        raise
+        st.error(f"Erro crítico de conexão: {e}")
+        return None
 
 
 def get_supabase_client_no_cache() -> SupabaseClient | None:

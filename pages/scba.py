@@ -10,5 +10,7 @@ if parent_dir not in sys.path:
 
 from views.inspecao_scba import show_page
 
-def page_scba():
-    show_page()
+# Função que será chamada pelo st.navigation
+def show_scba():
+    from views.inspecao_scba import show_page as scba_show_page
+    scba_show_page()

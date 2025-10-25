@@ -11,6 +11,6 @@ if parent_dir not in sys.path:
 from views.inspecao_extintores import show_page
 
 # Função que será chamada pelo st.navigation
-def show_page():
+def show_extintores():
     from views.inspecao_extintores import show_page as extintores_show_page
     extintores_show_page()

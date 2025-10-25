@@ -10,5 +10,7 @@ if parent_dir not in sys.path:
 
 from views.inspecao_camaras_espuma import show_page
 
-def page_camaras_espuma():
-    show_page()
+# Função que será chamada pelo st.navigation
+def show_camaras_espuma():
+    from views.inspecao_camaras_espuma import show_page as camaras_espuma_show_page
+    camaras_espuma_show_page()

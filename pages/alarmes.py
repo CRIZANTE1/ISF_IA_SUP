@@ -10,5 +10,7 @@ if parent_dir not in sys.path:
 
 from views.inspecao_alarmes import show_page
 
-def page_alarmes():
-    show_page()
+# Função que será chamada pelo st.navigation
+def show_alarmes():
+    from views.inspecao_alarmes import show_page as alarmes_show_page
+    alarmes_show_page()

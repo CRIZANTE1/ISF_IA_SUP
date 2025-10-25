@@ -10,5 +10,7 @@ if parent_dir not in sys.path:
 
 from views.perfil_usuario import show_page
 
-def page_meu_perfil():
-    show_page()
+# Função que será chamada pelo st.navigation
+def show_meu_perfil():
+    from views.perfil_usuario import show_page as perfil_show_page
+    perfil_show_page()

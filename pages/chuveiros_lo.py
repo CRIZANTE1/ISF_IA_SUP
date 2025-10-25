@@ -10,5 +10,7 @@ if parent_dir not in sys.path:
 
 from views.inspecao_chuveiros import show_page
 
-def page_chuveiros_lo():
-    show_page()
+# Função que será chamada pelo st.navigation
+def show_chuveiros_lo():
+    from views.inspecao_chuveiros import show_page as chuveiros_show_page
+    chuveiros_show_page()

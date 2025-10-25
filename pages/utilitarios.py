@@ -10,5 +10,7 @@ if parent_dir not in sys.path:
 
 from views.utilitarios import show_page
 
-def page_utilitarios():
-    show_page()
+# Função que será chamada pelo st.navigation
+def show_utilitarios():
+    from views.utilitarios import show_page as utilitarios_show_page
+    utilitarios_show_page()

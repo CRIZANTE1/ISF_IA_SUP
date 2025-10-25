@@ -11,6 +11,6 @@ if parent_dir not in sys.path:
 from views.trial_expired_page import show_page
 
 # Função que será chamada pelo st.navigation
-def show_page():
+def show_trial_expired():
     from views.trial_expired_page import show_page as trial_expired_show_page
     trial_expired_show_page()

@@ -10,5 +10,7 @@ if parent_dir not in sys.path:
 
 from views.inspecao_multigas import show_page
 
-def page_multigas():
-    show_page()
+# Função que será chamada pelo st.navigation
+def show_multigas():
+    from views.inspecao_multigas import show_page as multigas_show_page
+    multigas_show_page()

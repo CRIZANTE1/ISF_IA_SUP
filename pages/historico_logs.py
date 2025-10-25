@@ -10,5 +10,7 @@ if parent_dir not in sys.path:
 
 from views.historico import show_page
 
-def page_historico_logs():
-    show_page()
+# Função que será chamada pelo st.navigation
+def show_historico_logs():
+    from views.historico import show_page as historico_show_page
+    historico_show_page()

@@ -10,5 +10,7 @@ if parent_dir not in sys.path:
 
 from views.administracao import show_page
 
-def page_super_admin():
-    show_page()
+# Função que será chamada pelo st.navigation
+def show_super_admin():
+    from views.administracao import show_page as administracao_show_page
+    administracao_show_page()

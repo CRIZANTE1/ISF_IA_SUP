@@ -10,5 +10,7 @@ if parent_dir not in sys.path:
 
 from views.inspecao_canhoes_monitores import show_page
 
-def page_canhoes_monitores():
-    show_page()
+# Função que será chamada pelo st.navigation
+def show_canhoes_monitores():
+    from views.inspecao_canhoes_monitores import show_page as canhoes_monitores_show_page
+    canhoes_monitores_show_page()

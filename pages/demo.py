@@ -11,6 +11,6 @@ if parent_dir not in sys.path:
 from views.demo_page import show_page
 
 # Função que será chamada pelo st.navigation
-def show_page():
+def show_demo():
     from views.demo_page import show_page as demo_show_page
     demo_show_page()

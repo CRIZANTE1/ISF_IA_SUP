@@ -173,8 +173,8 @@ def get_users_data():
         db_client = get_supabase_client_for_script()
         if not db_client:
             return pd.DataFrame()
-        response = db_client.table("usuarios").select("*").execute()
-        df = pd.DataFrame(response.data)
+        # Usa get_data para aplicar filtros de segurança
+        df = db_client.get_data("usuarios")
 
         if df.empty:
             logger.warning("Tabela de usuários vazia.")

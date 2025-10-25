@@ -56,8 +56,22 @@ def create_page_function(page_module, title):
     """Cria uma função que executa uma página importada"""
     def page_wrapper():
         try:
-            # Executa a página importada
-            page_module.show_page()
+            # Tenta encontrar a função correta baseada no título
+            function_name = f"show_{title.lower().replace(' ', '_').replace('/', '_').replace('ç', 'c').replace('ã', 'a').replace('ô', 'o')}"
+            
+            # Remove caracteres especiais e acentos
+            import re
+            function_name = re.sub(r'[^a-zA-Z0-9_]', '_', function_name)
+            function_name = re.sub(r'_+', '_', function_name).strip('_')
+            
+            if hasattr(page_module, function_name):
+                getattr(page_module, function_name)()
+            elif hasattr(page_module, 'show_page'):
+                page_module.show_page()
+            else:
+                # Lista todas as funções disponíveis para debug
+                available_functions = [attr for attr in dir(page_module) if attr.startswith('show_')]
+                st.error(f"Função {function_name} não encontrada. Funções disponíveis: {available_functions}")
         except Exception as e:
             st.error(f"Erro ao carregar a página {title}: {e}")
     
@@ -203,7 +217,7 @@ def main():
                 st.session_state['unauthorized_logged'] = True
 
             show_user_header()
-            demo_page.show_page()
+            demo_page.show_demo()
             st.stop()
 
         effective_status = get_effective_user_status()
@@ -216,7 +230,7 @@ def main():
                 st.session_state['trial_expired_logged'] = True
 
             show_user_header()
-            trial_expired_page.show_page()
+            trial_expired_page.show_trial_expired()
             st.stop()
 
         # Usuário inativo (exceto admins)

@@ -32,11 +32,15 @@ if PERFIL_DISPONIVEL:
 
 def get_navigation_pages():
     """Cria a estrutura de navegação baseada nas permissões do usuário"""
-    user_role = get_user_role()
-    user_plan = get_effective_user_plan()
-    
-    # Páginas base
-    pages = {}
+    try:
+        user_role = get_user_role()
+        user_plan = get_effective_user_plan()
+        
+        # Páginas base
+        pages = {}
+    except Exception as e:
+        st.error(f"Erro ao obter informações do usuário: {e}")
+        return {}
     
     # Grupo: Dashboard e Relatórios
     dashboard_pages = []
@@ -211,8 +215,19 @@ def main():
             st.stop()
         
         # Executa a navegação
-        pg = st.navigation(pages, position="top")
-        pg.run()
+        try:
+            pg = st.navigation(pages, position="top")
+            pg.run()
+        except Exception as nav_error:
+            st.error(f"Erro na navegação: {nav_error}")
+            st.write("Páginas disponíveis:", pages)
+            # Fallback: mostra páginas simples
+            st.write("Tentando fallback...")
+            for group_name, group_pages in pages.items():
+                st.write(f"**{group_name}**")
+                for page in group_pages:
+                    st.write(f"- {page.title}")
+            st.stop()
 
     except Exception as e:
         st.error(f"Erro crítico na aplicação: {e}")

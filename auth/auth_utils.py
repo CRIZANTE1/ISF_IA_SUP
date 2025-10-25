@@ -101,8 +101,6 @@ def get_users_data_no_cache():
     """
     try:
         logger.info("🔄 Carregando dados de usuários do Supabase (sem cache)...")
-        from supabase_local import get_supabase_client
-        
         db_client = get_supabase_client()
         if db_client is None:
             logger.error("❌ Cliente Supabase não disponível")
@@ -195,7 +193,6 @@ def get_user_info() -> dict | None:
         
         # Tenta salvar o superuser na tabela para evitar fabricação repetida
         try:
-            from supabase_local import get_supabase_client
             db_client = get_supabase_client()
             if db_client is not None:
                 db_client.append_data("usuarios", superuser_record)
@@ -223,7 +220,6 @@ def is_uuid_unique(uuid_value: int) -> bool:
         bool: True se único, False se já existe
     """
     try:
-        from supabase_local import get_supabase_client
         db_client = get_supabase_client()
         
         if db_client is None:
@@ -278,9 +274,16 @@ def generate_strong_uuid(user_email: str) -> int:
     if final_uuid < 100000:
         final_uuid += 100000
     
-    # Verifica se é único, se não for, gera outro
+    # Verifica se é único, se não for, gera outro (limitado a 3 tentativas para evitar loops)
     attempts = 0
-    while not is_uuid_unique(final_uuid) and attempts < 5:
+    while attempts < 3:
+        try:
+            if is_uuid_unique(final_uuid):
+                break
+        except Exception as e:
+            logger.warning(f"Erro ao verificar unicidade do UUID: {e}")
+            break
+            
         attempts += 1
         # Gera um novo UUID com timestamp atualizado
         timestamp = str(int(time.time() * 1000) + attempts)
@@ -354,7 +357,6 @@ def generate_uuid_for_new_user(user_email: str) -> int:
     new_uuid = generate_strong_uuid(user_email)
     
     try:
-        from supabase_local import get_supabase_client
         db_client = get_supabase_client()
         
         if db_client is None:

@@ -403,6 +403,11 @@ def get_supabase_client() -> SupabaseClient | None:
             logger.warning("⚠️ Cliente Supabase já está sendo inicializado - evitando loop")
             return None
         
+        # Verifica se há um erro de inicialização anterior
+        if 'supabase_client_error' in st.session_state:
+            logger.warning("⚠️ Erro anterior na inicialização do Supabase - retornando None")
+            return None
+        
         # Marca que está inicializando
         st.session_state['supabase_client_initializing'] = True
         
@@ -421,6 +426,7 @@ def get_supabase_client() -> SupabaseClient | None:
             if elapsed_time > timeout_seconds:
                 logger.error(f"❌ Timeout na inicialização do cliente Supabase ({elapsed_time:.2f}s)")
                 st.error("Timeout na conexão com o banco de dados")
+                st.session_state['supabase_client_error'] = True
                 return None
             
             logger.info(f"✅ Cliente Supabase criado com sucesso em {elapsed_time:.2f}s")
@@ -428,6 +434,11 @@ def get_supabase_client() -> SupabaseClient | None:
             # Armazena na sessão para reutilização
             st.session_state['supabase_client'] = client
             return client
+            
+        except Exception as init_error:
+            logger.error(f"❌ Erro na inicialização do Supabase: {init_error}")
+            st.session_state['supabase_client_error'] = True
+            return None
             
         finally:
             # Remove a flag de inicialização
@@ -441,6 +452,9 @@ def get_supabase_client() -> SupabaseClient | None:
         # Remove a flag de inicialização em caso de erro
         if 'supabase_client_initializing' in st.session_state:
             del st.session_state['supabase_client_initializing']
+        
+        # Marca erro para evitar tentativas repetidas
+        st.session_state['supabase_client_error'] = True
         
         return None
 
@@ -456,3 +470,68 @@ def get_supabase_client_no_cache() -> SupabaseClient | None:
         logger.error(f"❌ Falha crítica ao criar cliente Supabase (sem cache): {e}")
         st.error(f"Erro crítico de conexão: {e}")
         return None
+
+
+def reset_supabase_client():
+    """Limpa o estado do cliente Supabase para permitir nova inicialização."""
+    if 'supabase_client' in st.session_state:
+        del st.session_state['supabase_client']
+    if 'supabase_client_initializing' in st.session_state:
+        del st.session_state['supabase_client_initializing']
+    if 'supabase_client_error' in st.session_state:
+        del st.session_state['supabase_client_error']
+    logger.info("🔄 Estado do cliente Supabase limpo - nova inicialização permitida")
+
+
+def diagnose_supabase_connection():
+    """Diagnostica problemas de conexão com o Supabase."""
+    try:
+        # Verifica se as credenciais existem
+        if "supabase" not in st.secrets:
+            return {
+                "status": "error",
+                "message": "Configuração do Supabase não encontrada em st.secrets",
+                "solution": "Configure as credenciais do Supabase no Streamlit Cloud"
+            }
+        
+        url = st.secrets["supabase"].get("url")
+        key = st.secrets["supabase"].get("key")
+        
+        if not url or not key:
+            return {
+                "status": "error", 
+                "message": "Credenciais do Supabase incompletas",
+                "solution": "Verifique se url e key estão configurados corretamente"
+            }
+        
+        if not url.startswith("https://"):
+            return {
+                "status": "error",
+                "message": "URL do Supabase inválida",
+                "solution": "A URL deve começar com https://"
+            }
+        
+        # Tenta uma conexão simples
+        try:
+            from supabase import create_client
+            test_client = create_client(url, key)
+            test_response = test_client.table("usuarios").select("id").limit(1).execute()
+            return {
+                "status": "success",
+                "message": "Conexão com Supabase funcionando",
+                "url": url,
+                "key_length": len(key)
+            }
+        except Exception as conn_error:
+            return {
+                "status": "error",
+                "message": f"Erro de conexão: {conn_error}",
+                "solution": "Verifique se o projeto Supabase está ativo e acessível"
+            }
+            
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Erro no diagnóstico: {e}",
+            "solution": "Verifique a configuração do Streamlit"
+        }

@@ -135,6 +135,32 @@ def get_user_info() -> dict | None:
     return user_entry.iloc[0].to_dict()
 
 
+def is_uuid_unique(uuid_value: int) -> bool:
+    """
+    Verifica se o UUID gerado é único na tabela usuarios.
+    
+    Args:
+        uuid_value: UUID a verificar
+        
+    Returns:
+        bool: True se único, False se já existe
+    """
+    try:
+        from supabase_local import get_supabase_client
+        db_client = get_supabase_client()
+        
+        # Busca se já existe um usuário com esse ID
+        existing_users = db_client.get_data("usuarios")
+        if not existing_users.empty and 'id' in existing_users.columns:
+            existing_ids = existing_users['id'].tolist()
+            return uuid_value not in existing_ids
+        
+        return True  # Se não conseguir verificar, assume que é único
+        
+    except Exception as e:
+        logger.warning(f"Erro ao verificar unicidade do UUID: {e}")
+        return True  # Em caso de erro, assume que é único
+
 def regenerate_user_uuid(user_email: str) -> int:
     """
     Força a regeneração de UUID para um usuário existente.
@@ -168,35 +194,53 @@ def regenerate_user_uuid(user_email: str) -> int:
 def generate_strong_uuid(user_email: str) -> int:
     """
     Gera um UUID forte e único para o usuário.
+    Compatível com PostgreSQL integer (até 2,147,483,647).
     
     Args:
         user_email: Email do usuário
         
     Returns:
-        int: UUID forte como inteiro
+        int: UUID forte como inteiro (dentro do range de integer)
     """
     import hashlib
     import time
     import random
     import uuid
     
-    # Método 1: UUID4 padrão (mais forte)
+    # Método 1: UUID4 padrão (mais forte) - limitado ao range de integer
     uuid4_string = str(uuid.uuid4()).replace('-', '')
-    uuid4_int = int(uuid4_string[:15], 16)  # Converte para int
+    uuid4_int = int(uuid4_string[:8], 16) % 2147483647  # Limita ao range de integer
     
     # Método 2: Hash SHA-256 com múltiplos fatores
-    timestamp = str(int(time.time() * 1000000))  # microsegundos
-    random_salt = str(random.randint(1000000, 9999999))
-    email_hash = hashlib.sha256(user_email.encode()).hexdigest()[:8]
+    timestamp = str(int(time.time() * 1000))  # milissegundos
+    random_salt = str(random.randint(100000, 999999))
+    email_hash = hashlib.sha256(user_email.encode()).hexdigest()[:6]
     
     combined_string = f"{user_email}{timestamp}{random_salt}{email_hash}"
     strong_hash = hashlib.sha256(combined_string.encode()).hexdigest()
-    hash_int = int(strong_hash[:12], 16)
+    hash_int = int(strong_hash[:8], 16) % 2147483647  # Limita ao range de integer
     
     # Combina ambos os métodos para máxima robustez
-    final_uuid = (uuid4_int + hash_int) % (10**15)  # Limita a 15 dígitos
+    final_uuid = (uuid4_int + hash_int) % 2147483647  # Garante que está no range
     
-    logger.info(f"🔐 UUID forte gerado: {final_uuid} (método combinado)")
+    # Garante que não seja muito pequeno (pelo menos 6 dígitos)
+    if final_uuid < 100000:
+        final_uuid += 100000
+    
+    # Verifica se é único, se não for, gera outro
+    attempts = 0
+    while not is_uuid_unique(final_uuid) and attempts < 5:
+        attempts += 1
+        # Gera um novo UUID com timestamp atualizado
+        timestamp = str(int(time.time() * 1000) + attempts)
+        combined_string = f"{user_email}{timestamp}{random.randint(100000, 999999)}"
+        strong_hash = hashlib.sha256(combined_string.encode()).hexdigest()
+        final_uuid = int(strong_hash[:8], 16) % 2147483647
+        
+        if final_uuid < 100000:
+            final_uuid += 100000
+    
+    logger.info(f"🔐 UUID forte gerado: {final_uuid} (compatível com PostgreSQL integer)")
     return final_uuid
 
 def get_user_id() -> int:
@@ -222,7 +266,7 @@ def get_user_id() -> int:
             user_id = int(user_id)
             
             # Verifica se é um ID simples (como 1, 2, 3) que precisa ser atualizado
-            if user_id < 1000:  # IDs simples precisam ser atualizados para UUID forte
+            if user_id < 10000:  # IDs simples precisam ser atualizados para UUID forte
                 logger.info(f"🔄 ID simples detectado ({user_id}) - atualizando para UUID forte...")
                 return regenerate_user_uuid(user_email)
             

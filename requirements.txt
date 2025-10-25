@@ -1,13 +1,18 @@
 
 
+# ========================
 # Backend e Banco de Dados
-supabase==2.3.4
+# ========================
+supabase>=2.3.4
 
-streamlit-option-menu
-
+# ========================
+# Streamlit e Interface
+# ========================
 streamlit>=1.28.0
-folium>=0.14.0
+streamlit-option-menu>=0.4.0
 streamlit-folium>=0.15.0
+streamlit-js-eval
+streamlit-lottie>=0.0.5
 
 # ========================
 # Manipulação de Dados e Datas
@@ -15,46 +20,58 @@ streamlit-folium>=0.15.0
 pandas>=2.0.0
 numpy>=1.24.0
 openpyxl>=3.1.0
-python-dateutil
+python-dateutil>=2.8.0
 
 # ========================
 # Google APIs & Autenticação
 # ========================
-google-api-python-client
-google-auth-httplib2
-google-auth-oauthlib
-google-generativeai
-authlib
-msal
+google-api-python-client>=2.0.0
+google-auth-httplib2>=0.1.0
+google-auth-oauthlib>=1.0.0
+google-generativeai>=0.3.0
+authlib>=1.0.0
+msal>=1.20.0
 
-# Comunicação HTTP (para baixar imagens)
 # ========================
-requests 
+# Comunicação HTTP e APIs
 # ========================
+requests>=2.27.0
+httpx>=0.25.0
+python-dotenv>=1.0.0
 
-
+# ========================
 # Processamento de Imagem e QR Code
 # ========================
-opencv-python-headless # Já inclui o detector de QR Code
-qrcode[pil] # Adiciona qrcode e sua dependência Pillow
-segno
-Pillow
+opencv-python-headless>=4.5.0
+qrcode[pil]>=7.0.0
+segno>=1.6.0
+Pillow>=9.0.0
 
 # ========================
-# Visualização (Opcional, mas bom ter)
+# Visualização e Mapas
 # ========================
 plotly>=5.18.0
+folium>=0.14.0
 
-streamlit-js-eval 
-weasyprint
-PyYAML
-streamlit-lottie
+# ========================
+# Geração de PDF (Opcional - pode ter problemas no Windows)
+# ========================
+# weasyprint>=66.0  # Comentado devido a problemas no Windows
 
+# ========================
+# Pagamentos e APIs Externas
+# ========================
+mercadopago>=2.2.1
 
-mercadopago==2.2.1
-fastapi==0.104.1
-uvicorn==0.24.0
-pydantic==2.4.2
-python-dotenv==1.0.0
-httpx==0.25.0
+# ========================
+# Web Framework (para APIs)
+# ========================
+fastapi>=0.104.1
+uvicorn>=0.24.0
+pydantic>=2.4.2
+
+# ========================
+# Utilitários
+# ========================
+PyYAML>=6.0
 jinja2>=3.1.2

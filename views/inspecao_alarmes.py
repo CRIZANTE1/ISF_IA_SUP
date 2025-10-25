@@ -203,6 +203,7 @@ def show_page():
 
                                         if not has_issues:
                                             #st.balloons()
+                                            pass
 
                                         st.cache_data.clear()
                                         st.rerun()

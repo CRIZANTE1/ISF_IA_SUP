@@ -12,6 +12,7 @@ from . import (
     resumo_gerencial,
     inspecao_multigas,
     inspecao_alarmes,
+    inspecao_canhoes_monitores,
     demo_page,
     trial_expired_page
 )
@@ -37,6 +38,7 @@ __all__ = [
     "resumo_gerencial",
     "inspecao_multigas",
     "inspecao_alarmes",
+    "inspecao_canhoes_monitores",
     "demo_page",
     "trial_expired_page"
 ]

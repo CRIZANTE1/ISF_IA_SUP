@@ -400,8 +400,18 @@ def get_supabase_client() -> SupabaseClient | None:
         
         # Verifica se há uma inicialização em andamento para evitar loops
         if 'supabase_client_initializing' in st.session_state:
-            logger.warning("⚠️ Cliente Supabase já está sendo inicializado - evitando loop")
-            return None
+            # Verifica se a inicialização está travada (mais de 30 segundos)
+            import time
+            current_time = time.time()
+            init_start_time = st.session_state.get('supabase_client_init_start_time', current_time)
+            
+            if current_time - init_start_time > 30:  # 30 segundos de timeout
+                logger.warning("⚠️ Inicialização do Supabase travada há mais de 30s - limpando estado")
+                force_cleanup_supabase_state()
+                return None
+            else:
+                logger.warning("⚠️ Cliente Supabase já está sendo inicializado - evitando loop")
+                return None
         
         # Verifica se há um erro de inicialização anterior
         if 'supabase_client_error' in st.session_state:
@@ -410,6 +420,7 @@ def get_supabase_client() -> SupabaseClient | None:
         
         # Marca que está inicializando
         st.session_state['supabase_client_initializing'] = True
+        st.session_state['supabase_client_init_start_time'] = time.time()
         
         logger.info("🔄 Inicializando cliente Supabase...")
         
@@ -480,7 +491,21 @@ def reset_supabase_client():
         del st.session_state['supabase_client_initializing']
     if 'supabase_client_error' in st.session_state:
         del st.session_state['supabase_client_error']
+    if 'supabase_client_init_start_time' in st.session_state:
+        del st.session_state['supabase_client_init_start_time']
     logger.info("🔄 Estado do cliente Supabase limpo - nova inicialização permitida")
+
+
+def force_cleanup_supabase_state():
+    """Força a limpeza do estado do Supabase quando travado."""
+    logger.warning("🔄 Forçando limpeza do estado do Supabase...")
+    reset_supabase_client()
+    
+    # Aguarda um momento para garantir que o estado foi limpo
+    import time
+    time.sleep(0.1)
+    
+    logger.info("✅ Estado do Supabase limpo com sucesso")
 
 
 def diagnose_supabase_connection():

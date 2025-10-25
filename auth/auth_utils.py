@@ -174,7 +174,21 @@ def get_user_info() -> dict | None:
     # Se não encontrou na tabela e é superuser, fabrica o registro
     if is_superuser():
         logger.info("👑 Superuser não encontrado na tabela - fabricando registro")
-        # Gera um ID único para o superuser se não existir
+        
+        # Tenta buscar o usuário novamente sem cache para verificar se realmente não existe
+        try:
+            users_df_no_cache = get_users_data_no_cache()
+            if not users_df_no_cache.empty:
+                user_entry_no_cache = users_df_no_cache[users_df_no_cache['email'] == user_email]
+                if not user_entry_no_cache.empty:
+                    logger.info(f"✅ Superuser {user_email} encontrado na busca sem cache")
+                    user_data = user_entry_no_cache.iloc[0].to_dict()
+                    logger.info(f"📋 Dados do usuário (sem cache): {user_data}")
+                    return user_data
+        except Exception as e:
+            logger.warning(f"⚠️ Erro na busca sem cache: {e}")
+        
+        # Se realmente não existe, gera um ID único para o superuser
         superuser_id = generate_strong_uuid(user_email)
         
         # Cria o registro do superuser
@@ -195,8 +209,19 @@ def get_user_info() -> dict | None:
         try:
             db_client = get_supabase_client()
             if db_client is not None:
-                db_client.append_data("usuarios", superuser_record)
-                logger.info(f"✅ Superuser {user_email} salvo na tabela usuarios com ID {superuser_id}")
+                # Verifica se o usuário já existe antes de tentar salvar
+                existing_users = db_client.get_data("usuarios")
+                if not existing_users.empty and 'email' in existing_users.columns:
+                    user_exists = not existing_users[existing_users['email'] == user_email].empty
+                    if user_exists:
+                        logger.info(f"✅ Superuser {user_email} já existe na tabela - não salvando duplicado")
+                    else:
+                        db_client.append_data("usuarios", superuser_record)
+                        logger.info(f"✅ Superuser {user_email} salvo na tabela usuarios com ID {superuser_id}")
+                else:
+                    # Se não conseguiu verificar, tenta salvar mesmo assim
+                    db_client.append_data("usuarios", superuser_record)
+                    logger.info(f"✅ Superuser {user_email} salvo na tabela usuarios com ID {superuser_id}")
             else:
                 logger.warning("⚠️ Cliente Supabase não disponível - usando registro fabricado")
         except Exception as e:

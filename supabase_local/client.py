@@ -20,17 +20,54 @@ class SupabaseClient:
         try:
             # Verifica se as credenciais existem
             if "supabase" not in st.secrets:
-                raise ValueError("Seção [supabase] não encontrada em secrets.toml")
+                error_msg = """
+                ❌ **Configuração do Supabase não encontrada!**
+                
+                Para usar este aplicativo, você precisa configurar as credenciais do Supabase no Streamlit Cloud:
+                
+                1. Acesse as configurações do seu app no Streamlit Cloud
+                2. Vá em "Settings" > "Secrets"
+                3. Adicione as seguintes configurações:
+                
+                ```toml
+                [supabase]
+                url = "https://seu-projeto.supabase.co"
+                key = "sua-anon-key"
+                ```
+                
+                **Para obter essas credenciais:**
+                - Acesse seu projeto no Supabase
+                - Vá em Settings > API
+                - Copie a URL do projeto e a anon key
+                """
+                st.error(error_msg)
+                st.stop()
+                raise ValueError("Configuração do Supabase ausente")
             
             url = st.secrets["supabase"].get("url")
             key = st.secrets["supabase"].get("key")
             
             if not url or not key:
-                raise ValueError("Credenciais do Supabase não encontradas em secrets.toml")
+                error_msg = """
+                ❌ **Credenciais do Supabase incompletas!**
+                
+                Verifique se você configurou corretamente no Streamlit Cloud:
+                
+                ```toml
+                [supabase]
+                url = "https://seu-projeto.supabase.co"
+                key = "sua-anon-key"
+                ```
+                """
+                st.error(error_msg)
+                st.stop()
+                raise ValueError("Credenciais do Supabase incompletas")
             
             # Valida formato da URL
             if not url.startswith("https://"):
-                raise ValueError("URL do Supabase deve começar com https://")
+                st.error("❌ URL do Supabase deve começar com https://")
+                st.stop()
+                raise ValueError("URL do Supabase inválida")
             
             # Cria cliente com timeout
             import requests
@@ -56,11 +93,13 @@ class SupabaseClient:
             error_msg = f"Configuração do Supabase ausente: {e}"
             logger.error(error_msg)
             st.error(error_msg)
+            st.stop()
             raise
         except Exception as e:
             error_msg = f"Erro ao inicializar cliente Supabase: {e}"
             logger.error(error_msg)
             st.error(error_msg)
+            st.stop()
             raise
 
     def _get_current_user_id(self) -> int:
@@ -248,9 +287,9 @@ def get_supabase_client() -> SupabaseClient:
         return client
     except Exception as e:
         logger.error(f"❌ Falha crítica ao criar cliente Supabase: {e}")
-        st.error(f"Erro crítico de conexão: {e}")
-        # Retorna um cliente "dummy" para evitar travamento total
-        return None
+        # Não retorna None para evitar erros em cascata
+        # O erro já foi tratado no _initialize_client com st.stop()
+        raise
 
 
 def get_supabase_client_no_cache() -> SupabaseClient:

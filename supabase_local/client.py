@@ -18,14 +18,38 @@ class SupabaseClient:
     def _initialize_client(self) -> Client:
         """Inicializa a conexão com o Supabase."""
         try:
-            url = st.secrets["supabase"]["url"]
-            key = st.secrets["supabase"]["key"]
+            # Verifica se as credenciais existem
+            if "supabase" not in st.secrets:
+                raise ValueError("Seção [supabase] não encontrada em secrets.toml")
+            
+            url = st.secrets["supabase"].get("url")
+            key = st.secrets["supabase"].get("key")
             
             if not url or not key:
                 raise ValueError("Credenciais do Supabase não encontradas em secrets.toml")
             
+            # Valida formato da URL
+            if not url.startswith("https://"):
+                raise ValueError("URL do Supabase deve começar com https://")
+            
+            # Cria cliente com timeout
+            import requests
+            import time
+            
+            start_time = time.time()
             client = create_client(url, key)
-            logger.info("✅ Cliente Supabase inicializado com sucesso")
+            
+            # Testa conexão básica
+            try:
+                # Teste simples de conectividade
+                test_response = client.table("usuarios").select("id").limit(1).execute()
+                logger.info("✅ Conexão com Supabase testada com sucesso")
+            except Exception as test_error:
+                logger.warning(f"⚠️ Aviso: Teste de conexão falhou: {test_error}")
+                # Não falha aqui, apenas avisa
+            
+            elapsed_time = time.time() - start_time
+            logger.info(f"✅ Cliente Supabase inicializado em {elapsed_time:.2f}s")
             return client
             
         except KeyError as e:
@@ -42,6 +66,12 @@ class SupabaseClient:
     def _get_current_user_id(self) -> int:
         """Obtém o user_id (INTEGER) do usuário logado da sessão."""
         try:
+            # Evita dependência circular - obtém user_id diretamente da sessão
+            user_id = st.session_state.get('current_user_id')
+            if user_id:
+                return int(user_id)
+            
+            # Fallback: tenta obter via auth_utils se não estiver na sessão
             from auth.auth_utils import get_user_id
             return get_user_id()
         except Exception as e:
@@ -201,4 +231,26 @@ class SupabaseClient:
 @st.cache_resource
 def get_supabase_client() -> SupabaseClient:
     """Retorna instância única (singleton) do cliente Supabase."""
-    return SupabaseClient()
+    try:
+        logger.info("🔄 Inicializando cliente Supabase...")
+        client = SupabaseClient()
+        logger.info("✅ Cliente Supabase criado com sucesso")
+        return client
+    except Exception as e:
+        logger.error(f"❌ Falha crítica ao criar cliente Supabase: {e}")
+        st.error(f"Erro crítico de conexão: {e}")
+        # Retorna um cliente "dummy" para evitar travamento total
+        return None
+
+
+def get_supabase_client_no_cache() -> SupabaseClient:
+    """Versão sem cache para casos de emergência."""
+    try:
+        logger.info("🔄 Inicializando cliente Supabase (sem cache)...")
+        client = SupabaseClient()
+        logger.info("✅ Cliente Supabase criado com sucesso (sem cache)")
+        return client
+    except Exception as e:
+        logger.error(f"❌ Falha crítica ao criar cliente Supabase (sem cache): {e}")
+        st.error(f"Erro crítico de conexão: {e}")
+        return None

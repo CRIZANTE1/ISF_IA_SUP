@@ -35,6 +35,13 @@ def is_superuser() -> bool:
     try:
         user_email = get_user_email()
         superuser_email = st.secrets.get("superuser", {}).get("admin_email", "").lower().strip()
+        
+        # Debug temporário
+        print(f"🔍 DEBUG is_superuser:")
+        print(f"  - user_email: {user_email}")
+        print(f"  - superuser_email: {superuser_email}")
+        print(f"  - Comparação: {user_email == superuser_email}")
+        
         return user_email is not None and user_email == superuser_email
     except (KeyError, AttributeError):
         return False
@@ -98,7 +105,10 @@ def get_user_info() -> dict | None:
     Retorna o registro do usuário. Se for o superusuário, "fabrica" o registro
     usando os dados dos segredos, incluindo o ambiente de testes.
     """
+    print(f"🔍 DEBUG get_user_info - is_superuser(): {is_superuser()}")
+    
     if is_superuser():
+        print("🔍 DEBUG - Usuário identificado como superuser")
         # "Fabrica" um registro de usuário mestre, agora incluindo o ambiente de testes dos segredos.
         return {
             'email': get_user_email(),

@@ -161,35 +161,6 @@ def is_uuid_unique(uuid_value: int) -> bool:
         logger.warning(f"Erro ao verificar unicidade do UUID: {e}")
         return True  # Em caso de erro, assume que é único
 
-def regenerate_user_uuid(user_email: str) -> int:
-    """
-    Força a regeneração de UUID para um usuário existente.
-    Útil para atualizar IDs antigos para UUIDs mais fortes.
-    
-    Args:
-        user_email: Email do usuário
-        
-    Returns:
-        int: Novo UUID forte
-    """
-    logger.info(f"🔄 Regenerando UUID forte para {user_email}...")
-    
-    new_uuid = generate_strong_uuid(user_email)
-    
-    try:
-        from supabase_local import get_supabase_client
-        db_client = get_supabase_client()
-        
-        # Atualiza o registro do usuário com o novo UUID
-        update_data = {'id': new_uuid}
-        db_client.update_data("usuarios", update_data, "email", user_email)
-        
-        logger.info(f"✅ Novo UUID forte {new_uuid} salvo para {user_email}")
-        return new_uuid
-        
-    except Exception as e:
-        logger.error(f"❌ Erro ao salvar novo UUID: {e}")
-        return new_uuid
 
 def generate_strong_uuid(user_email: str) -> int:
     """
@@ -246,11 +217,21 @@ def generate_strong_uuid(user_email: str) -> int:
 def get_user_id() -> int:
     """
     Retorna o ID (INTEGER) do usuário logado.
-    Se o usuário não tiver ID, gera um temporário baseado no email.
+    Aceita qualquer ID existente (simples como 1, 2, 3 ou UUID forte como 308380173).
+    NÃO gera UUIDs automaticamente - apenas retorna o ID existente.
     
     Returns:
         int: ID do usuário ou None se não encontrado
     """
+    # Verifica se já temos o user_id na sessão (evita loops)
+    if 'current_user_id' in st.session_state and st.session_state['current_user_id']:
+        try:
+            cached_id = int(st.session_state['current_user_id'])
+            logger.info(f"✅ ID do usuário da sessão: {cached_id}")
+            return cached_id
+        except (ValueError, TypeError):
+            logger.warning(f"ID da sessão inválido: {st.session_state['current_user_id']}")
+    
     user_info = get_user_info()
     
     if not user_info:
@@ -261,44 +242,51 @@ def get_user_id() -> int:
     user_email = user_info.get('email')
     
     # Converte ID para inteiro se for string
+    # Aceita qualquer ID existente (simples ou UUID forte)
     if user_id is not None:
         try:
             user_id = int(user_id)
-            
-            # Verifica se é um ID simples (como 1, 2, 3) que precisa ser atualizado
-            if user_id < 10000:  # IDs simples precisam ser atualizados para UUID forte
-                logger.info(f"🔄 ID simples detectado ({user_id}) - atualizando para UUID forte...")
-                return regenerate_user_uuid(user_email)
-            
-            logger.info(f"✅ ID do usuário {user_email}: {user_id}")
+            logger.info(f"✅ ID do usuário {user_email}: {user_id} (aceito como válido)")
+            # Armazena na sessão para evitar consultas repetidas
+            st.session_state['current_user_id'] = user_id
             return user_id
         except (ValueError, TypeError):
             logger.warning(f"ID do usuário não é um número válido: {user_id}")
     
-    # Se não tem ID ou é inválido, gera um UUID forte
-    logger.warning(f"Usuário {user_email} não possui ID válido na tabela usuarios!")
-    logger.info("🔧 Gerando UUID forte usando método combinado...")
+    # Se não tem ID, retorna None (não gera automaticamente)
+    logger.warning(f"Usuário {user_email} não possui ID na tabela usuarios!")
+    return None
+
+
+def generate_uuid_for_new_user(user_email: str) -> int:
+    """
+    Gera UUID forte APENAS para novos usuários.
+    Usado quando um novo usuário é cadastrado no sistema.
     
-    # Gera UUID forte usando método combinado
-    temp_id = generate_strong_uuid(user_email)
+    Args:
+        user_email: Email do novo usuário
+        
+    Returns:
+        int: UUID forte para o novo usuário
+    """
+    logger.info(f"🔧 Gerando UUID forte para NOVO usuário: {user_email}")
     
-    # Tenta atualizar o registro no banco com o ID gerado
+    new_uuid = generate_strong_uuid(user_email)
+    
     try:
         from supabase_local import get_supabase_client
         db_client = get_supabase_client()
         
-        # Atualiza o registro do usuário com o ID gerado
-        update_data = {'id': temp_id}
+        # Atualiza o registro do usuário com o novo UUID
+        update_data = {'id': new_uuid}
         db_client.update_data("usuarios", update_data, "email", user_email)
         
-        logger.info(f"✅ UUID forte {temp_id} salvo no banco para {user_email}")
-        return temp_id
+        logger.info(f"✅ UUID forte {new_uuid} salvo para NOVO usuário {user_email}")
+        return new_uuid
         
     except Exception as e:
-        logger.error(f"❌ Erro ao salvar UUID forte: {e}")
-        # Retorna o UUID mesmo se não conseguir salvar
-        return temp_id
-
+        logger.error(f"❌ Erro ao salvar UUID para novo usuário: {e}")
+        return new_uuid
 
 def save_access_request(user_name, user_email, justification):
     """Salva uma solicitação de acesso na tabela 'solicitacoes_acesso' do Supabase."""
@@ -461,12 +449,15 @@ def setup_sidebar():
     effective_status = get_effective_user_status()
     user_email = user_info.get('email')
     
-    # Obtém o user_id (gera automaticamente se não existir)
+    # Obtém o user_id (não gera automaticamente)
     user_id = get_user_id()
     if not user_id:
-        st.sidebar.error("❌ Erro ao obter ID do usuário.")
-        logger.error(f"Usuário {user_email} - erro ao obter ID!")
-        return False
+        st.sidebar.warning("⚠️ Usuário sem ID no sistema.")
+        logger.warning(f"Usuário {user_email} não possui ID - pode ser um usuário novo")
+        # Para usuários sem ID, ainda permite acesso (pode ser superuser ou novo usuário)
+        st.session_state['current_user_id'] = None
+        st.session_state['current_user_email'] = user_email
+        return True  # Permite acesso mesmo sem ID
     
     # Garante que user_id é inteiro
     try:
@@ -490,8 +481,10 @@ def setup_sidebar():
     
     # ✅ Armazena user_id na sessão para uso pelo SupabaseClient
     if st.session_state.get('current_user_id') != user_id:
-        st.cache_data.clear()
-        logger.info(f"🔄 Cache limpo para novo usuário: {user_email}")
+        # Só limpa cache se realmente mudou de usuário
+        if st.session_state.get('current_user_id') is not None:
+            st.cache_data.clear()
+            logger.info(f"🔄 Cache limpo para novo usuário: {user_email}")
     
     st.session_state['current_user_id'] = user_id
     st.session_state['current_user_email'] = user_email

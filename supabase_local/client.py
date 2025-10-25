@@ -113,22 +113,16 @@ class SupabaseClient:
                 except (ValueError, TypeError):
                     logger.warning(f"user_id na sessão não é um número válido: {user_id}")
             
-            # Fallback: tenta obter via consulta direta ao Supabase
-            # para evitar dependência circular com auth_utils
+            # Se não tem na sessão, tenta obter via auth_utils (evita loop)
             try:
-                user_email = st.session_state.get('user_email')
-                if user_email:
-                    # Consulta direta ao Supabase para obter user_id
-                    response = self.client.table("usuarios").select("id").eq("email", user_email).execute()
-                    if response.data:
-                        raw_id = response.data[0]['id']
-                        try:
-                            return int(raw_id)
-                        except (ValueError, TypeError):
-                            logger.warning(f"ID do Supabase não é um número válido: {raw_id}")
-                            return None
-            except Exception as fallback_error:
-                logger.warning(f"Fallback para obter user_id falhou: {fallback_error}")
+                from auth.auth_utils import get_user_id
+                user_id = get_user_id()
+                if user_id:
+                    # Armazena na sessão para próximas consultas
+                    st.session_state['current_user_id'] = user_id
+                    return user_id
+            except Exception as auth_error:
+                logger.warning(f"Erro ao obter user_id via auth_utils: {auth_error}")
             
             return None
         except Exception as e:
@@ -161,8 +155,8 @@ class SupabaseClient:
             # 🔒 APLICA FILTRO DE SEGURANÇA (multi-tenant) usando user_id
             if table_name not in GLOBAL_TABLES:
                 if not self.user_id:
-                    logger.warning(f"Usuário não identificado. Não é possível acessar '{table_name}'.")
-                    st.warning(f"⚠️ Usuário não identificado para acessar '{table_name}'.")
+                    logger.warning(f"Usuário não identificado. Retornando dados vazios para '{table_name}'.")
+                    # Não mostra warning para o usuário, apenas retorna dados vazios
                     return pd.DataFrame()
                 
                 query = query.eq('user_id', self.user_id)

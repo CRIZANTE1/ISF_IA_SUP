@@ -173,7 +173,7 @@ def get_user_info() -> dict | None:
     
     # Se não encontrou na tabela e é superuser, fabrica o registro
     if is_superuser():
-        logger.info("👑 Superuser não encontrado na tabela - fabricando registro")
+        logger.info("👑 Superuser não encontrado na tabela - verificando se realmente não existe")
         
         # Tenta buscar o usuário novamente sem cache para verificar se realmente não existe
         try:
@@ -188,12 +188,11 @@ def get_user_info() -> dict | None:
         except Exception as e:
             logger.warning(f"⚠️ Erro na busca sem cache: {e}")
         
-        # Se realmente não existe, gera um ID único para o superuser
-        superuser_id = generate_strong_uuid(user_email)
+        # IMPORTANTE: NÃO cria registro na tabela se o usuário já existir
+        # Apenas retorna registro fabricado para uso da sessão atual
+        logger.info(f"✅ Registro fabricado para superuser {user_email} (NÃO salvo na tabela - apenas para uso temporário)")
         
-        # Cria o registro do superuser
         superuser_record = {
-            'id': superuser_id,
             'email': user_email,
             'nome': 'Desenvolvedor (Mestre)',
             'role': 'admin',
@@ -204,28 +203,6 @@ def get_user_info() -> dict | None:
             'data_cadastro': date.today().isoformat(),
             'trial_end_date': None
         }
-        
-        # Tenta salvar o superuser na tabela para evitar fabricação repetida
-        try:
-            db_client = get_supabase_client()
-            if db_client is not None:
-                # Verifica se o usuário já existe antes de tentar salvar
-                existing_users = db_client.get_data("usuarios")
-                if not existing_users.empty and 'email' in existing_users.columns:
-                    user_exists = not existing_users[existing_users['email'] == user_email].empty
-                    if user_exists:
-                        logger.info(f"✅ Superuser {user_email} já existe na tabela - não salvando duplicado")
-                    else:
-                        db_client.append_data("usuarios", superuser_record)
-                        logger.info(f"✅ Superuser {user_email} salvo na tabela usuarios com ID {superuser_id}")
-                else:
-                    # Se não conseguiu verificar, tenta salvar mesmo assim
-                    db_client.append_data("usuarios", superuser_record)
-                    logger.info(f"✅ Superuser {user_email} salvo na tabela usuarios com ID {superuser_id}")
-            else:
-                logger.warning("⚠️ Cliente Supabase não disponível - usando registro fabricado")
-        except Exception as e:
-            logger.warning(f"⚠️ Erro ao salvar superuser na tabela: {e} - usando registro fabricado")
         
         return superuser_record
     
@@ -361,9 +338,56 @@ def get_user_id() -> int | None:
         except (ValueError, TypeError):
             logger.warning(f"ID do usuário não é um número válido: {user_id}")
     
-    # Se não tem ID, retorna None (não gera automaticamente)
-    logger.warning(f"Usuário {user_email} não possui ID na tabela usuarios!")
-    return None
+    # Se não tem ID, verifica se é um registro fabricado (superuser)
+    if is_superuser():
+        logger.warning(f"Superuser {user_email} não possui ID - pode ser um usuário novo")
+        # Para superuser sem ID, gera um ID temporário apenas para a sessão
+        # NÃO salva na tabela - apenas para uso da sessão atual
+        temp_id = generate_strong_uuid(user_email)
+        st.session_state['current_user_id'] = temp_id
+        logger.info(f"🔐 ID temporário gerado para superuser: {temp_id}")
+        return temp_id
+    else:
+        logger.warning(f"Usuário {user_email} não possui ID na tabela usuarios!")
+        return None
+
+
+def save_new_user_with_id(user_email: str, user_data: dict) -> int:
+    """
+    Salva um NOVO usuário na tabela com ID gerado.
+    Usado apenas para usuários que realmente não existem na tabela.
+    
+    Args:
+        user_email: Email do novo usuário
+        user_data: Dados do usuário para salvar
+        
+    Returns:
+        int: UUID forte para o novo usuário
+    """
+    logger.info(f"🔧 Salvando NOVO usuário com ID: {user_email}")
+    
+    new_uuid = generate_strong_uuid(user_email)
+    
+    try:
+        db_client = get_supabase_client()
+        
+        if db_client is None:
+            logger.warning("Cliente Supabase não disponível")
+            return new_uuid
+        
+        # Adiciona o ID aos dados do usuário
+        user_data_with_id = user_data.copy()
+        user_data_with_id['id'] = new_uuid
+        
+        # Salva o novo usuário na tabela
+        db_client.append_data("usuarios", user_data_with_id)
+        
+        logger.info(f"✅ NOVO usuário {user_email} salvo com ID {new_uuid}")
+        return new_uuid
+        
+    except Exception as e:
+        logger.error(f"❌ Erro ao salvar novo usuário: {e}")
+        return new_uuid
 
 
 def generate_uuid_for_new_user(user_email: str) -> int:

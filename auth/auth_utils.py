@@ -138,6 +138,31 @@ def get_user_info() -> dict | None:
         logger.warning("Email do usuário não encontrado")
         return None
     
+    # Circuit breaker: evita loops infinitos
+    if 'get_user_info_called' in st.session_state:
+        call_count = st.session_state.get('get_user_info_call_count', 0)
+        if call_count > 5:  # Máximo 5 tentativas (reduzido para ser mais eficiente)
+            logger.warning(f"⚠️ Circuit breaker ativado - muitas tentativas para {user_email}")
+            # Retorna registro fabricado para superuser SEM tentar buscar na tabela
+            if is_superuser():
+                logger.info(f"✅ Retornando registro fabricado para superuser {user_email} (circuit breaker ativo)")
+                return {
+                    'email': user_email,
+                    'nome': 'Desenvolvedor (Mestre)',
+                    'role': 'admin',
+                    'plano': 'premium_ia',
+                    'status': 'ativo',
+                    'spreadsheet_id': st.secrets.get("superuser", {}).get("spreadsheet_id"),
+                    'folder_id': st.secrets.get("superuser", {}).get("folder_id"),
+                    'data_cadastro': date.today().isoformat(),
+                    'trial_end_date': None
+                }
+            return None
+        st.session_state['get_user_info_call_count'] = call_count + 1
+    else:
+        st.session_state['get_user_info_called'] = True
+        st.session_state['get_user_info_call_count'] = 1
+    
     # Verifica se as credenciais do Supabase estão configuradas
     try:
         credentials_check = check_supabase_credentials()
@@ -457,6 +482,15 @@ def generate_uuid_for_new_user(user_email: str) -> int:
     except Exception as e:
         logger.error(f"❌ Erro ao salvar UUID para novo usuário: {e}")
         return new_uuid
+
+def reset_user_info_circuit_breaker():
+    """Limpa o circuit breaker do get_user_info para permitir novas tentativas."""
+    if 'get_user_info_called' in st.session_state:
+        del st.session_state['get_user_info_called']
+    if 'get_user_info_call_count' in st.session_state:
+        del st.session_state['get_user_info_call_count']
+    logger.info("🔄 Circuit breaker do get_user_info limpo - novas tentativas permitidas")
+
 
 def check_supabase_credentials():
     """Verifica se as credenciais do Supabase estão configuradas corretamente."""

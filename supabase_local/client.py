@@ -71,9 +71,19 @@ class SupabaseClient:
             if user_id:
                 return int(user_id)
             
-            # Fallback: tenta obter via auth_utils se não estiver na sessão
-            from auth.auth_utils import get_user_id
-            return get_user_id()
+            # Fallback: tenta obter via consulta direta ao Supabase
+            # para evitar dependência circular com auth_utils
+            try:
+                user_email = st.session_state.get('user_email')
+                if user_email:
+                    # Consulta direta ao Supabase para obter user_id
+                    response = self.client.table("usuarios").select("id").eq("email", user_email).execute()
+                    if response.data:
+                        return int(response.data[0]['id'])
+            except Exception as fallback_error:
+                logger.warning(f"Fallback para obter user_id falhou: {fallback_error}")
+            
+            return None
         except Exception as e:
             logger.warning(f"Não foi possível obter user_id: {e}")
             return None

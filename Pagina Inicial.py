@@ -17,19 +17,19 @@ if current_dir not in sys.path:
     sys.path.insert(0, current_dir)
 
 # Importações das páginas
-import pages.01_Dashboard as dashboard_page
-import pages.02_Resumo_Gerencial as resumo_gerencial_page
-import pages.03_Extintores as extintores_page
-import pages.04_Mangueiras as mangueiras_page
-import pages.05_SCBA as scba_page
-import pages.06_Chuveiros_LO as chuveiros_page
-import pages.07_Camaras_Espuma as camaras_espuma_page
-import pages.08_Multigas as multigas_page
-import pages.11_Historico_Logs as historico_page
-import pages.09_Alarmes as alarmes_page
-import pages.12_Utilitarios as utilitarios_page
-import pages.10_Canhoes_Monitores as canhoes_monitores_page
-import pages.14_Super_Admin as administracao_page
+import pages.dashboard as dashboard_page
+import pages.resumo_gerencial as resumo_gerencial_page
+import pages.extintores as extintores_page
+import pages.mangueiras as mangueiras_page
+import pages.scba as scba_page
+import pages.chuveiros_lo as chuveiros_page
+import pages.camaras_espuma as camaras_espuma_page
+import pages.multigas as multigas_page
+import pages.historico_logs as historico_page
+import pages.alarmes as alarmes_page
+import pages.utilitarios as utilitarios_page
+import pages.canhoes_monitores as canhoes_monitores_page
+import pages.super_admin as administracao_page
 
 # Importações das páginas especiais
 import pages.demo as demo_page

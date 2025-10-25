@@ -61,6 +61,8 @@ def create_page_function(page_module, title):
         except Exception as e:
             st.error(f"Erro ao carregar a página {title}: {e}")
     
+    # Renomeia a função para ter um nome único baseado no título
+    page_wrapper.__name__ = f"page_{title.lower().replace(' ', '_').replace('/', '_')}"
     return page_wrapper
 
 def get_navigation_pages():

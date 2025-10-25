@@ -10,5 +10,7 @@ if parent_dir not in sys.path:
 
 from views.dashboard import show_page
 
-# Executa a página diretamente
-show_page()
+# Função que será chamada pelo st.navigation
+def show_page():
+    from views.dashboard import show_page as dashboard_show_page
+    dashboard_show_page()

@@ -10,5 +10,7 @@ if parent_dir not in sys.path:
 
 from views.inspecao_mangueiras import show_page
 
-def page_mangueiras():
-    show_page()
+# Função que será chamada pelo st.navigation
+def show_page():
+    from views.inspecao_mangueiras import show_page as mangueiras_show_page
+    mangueiras_show_page()

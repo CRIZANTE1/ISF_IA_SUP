@@ -10,5 +10,7 @@ if parent_dir not in sys.path:
 
 from views.resumo_gerencial import show_page
 
-# Executa a página diretamente
-show_page()
+# Função que será chamada pelo st.navigation
+def show_page():
+    from views.resumo_gerencial import show_page as resumo_show_page
+    resumo_show_page()
